@@ -3,6 +3,7 @@ import { request } from "node:https";
 import { createBrotliDecompress, createGunzip, createInflate } from "node:zlib";
 import ipaddr from "ipaddr.js";
 import { normalizeAmazonUrl, type AmazonLink } from "../amazon-url";
+import type { Product } from "../contracts";
 import { AppError } from "../errors";
 import { parseProductHtml } from "./product-parser";
 import type { ServerConfig } from "./config";
@@ -141,16 +142,69 @@ async function fetchFirecrawlHtml(link: AmazonLink, key: string, signal: AbortSi
   return payload.data.rawHtml;
 }
 
-export async function fetchProduct(link: AmazonLink, config: ServerConfig, parentSignal: AbortSignal) {
+/**
+ * Fetches the page through an operator-configured relay so the request leaves from another region.
+ * Amazon hides the price of a listing it cannot ship to the caller's region, and that price is absent
+ * from the HTML entirely, so no parsing change can recover it from a restricted region.
+ */
+export async function fetchRelayHtml(link: AmazonLink, endpoint: string, signal: AbortSignal): Promise<string> {
+  const target = endpoint.replace("{url}", encodeURIComponent(link.url));
+  const response = await fetch(target, {
+    signal, redirect: "follow",
+    headers: { Accept: "text/html,application/xhtml+xml", "Accept-Language": "en-US,en;q=0.9" },
+  });
+  if (!response.ok) {
+    await response.body?.cancel();
+    throw new AppError("SOURCE_PROVIDER_ERROR", response.status === 401 || response.status === 402 || response.status === 403
+      ? "商品页面中转服务拒绝了请求，请检查 PRODUCT_FETCH_ENDPOINT 的权限与额度。"
+      : `商品页面中转服务暂时失败（${response.status}）。`, 502, response.status >= 500 || response.status === 429);
+  }
+  const html = await readResponseText(response);
+  if (!html.trim()) throw new AppError("SOURCE_EMPTY", "中转服务未返回商品页面内容。", 502);
+  return html;
+}
+
+export type HtmlProvider = "direct" | "firecrawl" | "relay";
+export type HtmlFetcher = (link: AmazonLink, provider: HtmlProvider, config: ServerConfig, signal: AbortSignal) => Promise<string>;
+
+const fetchHtmlFor: HtmlFetcher = (link, provider, config, signal) => {
+  if (provider === "relay") return fetchRelayHtml(link, config.fetchEndpoint, signal);
+  if (provider === "firecrawl") return fetchFirecrawlHtml(link, config.firecrawlKey, signal);
+  return fetchDirectHtml(link, signal);
+};
+
+export async function fetchProduct(link: AmazonLink, config: ServerConfig, parentSignal: AbortSignal, fetchHtml: HtmlFetcher = fetchHtmlFor) {
   const signal = AbortSignal.any([parentSignal, AbortSignal.timeout(30000)]);
+  const primary = config.source === "firecrawl" ? "firecrawl" : "direct";
+  let product: Product;
   try {
-    const html = config.source === "firecrawl"
-      ? await fetchFirecrawlHtml(link, config.firecrawlKey, signal)
-      : await fetchDirectHtml(link, signal);
-    return parseProductHtml(html, link, config.source);
+    product = parseProductHtml(await fetchHtml(link, primary, config, signal), link, primary);
   } catch (error) {
     if (error instanceof AppError) throw error;
     if (signal.aborted) throw new AppError("SOURCE_TIMEOUT", "商品信息获取超时，未继续生成。请稍后重试或更换采集来源。", 504, true);
     throw new AppError("SOURCE_CONNECTION_ERROR", "无法连接商品信息来源，请检查网络或接口配置。", 502, true);
   }
+  if (product.priceUnavailableReason !== "region_restricted") return product;
+  // The primary region cannot see this listing's price. Retry through another region when the operator
+  // configured one, and only accept the retry when it really priced the same ASIN.
+  const fallbacks = ([config.fetchEndpoint ? "relay" : null, config.firecrawlKey && primary !== "firecrawl" ? "firecrawl" : null]
+    .filter(Boolean) as HtmlProvider[]);
+  for (const provider of fallbacks) {
+    try {
+      const retry = parseProductHtml(await fetchHtml(link, provider, config, signal), link, provider);
+      if (retry.price && retry.asin === product.asin) {
+        return {
+          ...retry,
+          warnings: [`价格通过 ${provider === "relay" ? "配置的取回中转" : "Firecrawl"} 从其他地区取得，本机直连所在地区不可配送该商品。`, ...retry.warnings],
+        };
+      }
+    } catch { /* A failing fallback must not discard the product facts already collected. */ }
+    if (signal.aborted) break;
+  }
+  return {
+    ...product,
+    warnings: fallbacks.length
+      ? ["已尝试从其他地区取回价格但未成功，因此价格仍为未知，未使用任何替代金额。", ...product.warnings]
+      : product.warnings,
+  };
 }

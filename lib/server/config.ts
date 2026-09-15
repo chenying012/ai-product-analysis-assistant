@@ -7,6 +7,8 @@ export type ServerConfig = {
   model: string;
   source: "direct" | "firecrawl";
   firecrawlKey: string;
+  /** Optional relay that fetches the product page from another region. Empty when not configured. */
+  fetchEndpoint: string;
 };
 
 export function getSetupStatus(env: Readonly<Record<string, string | undefined>> = process.env): SetupStatus {
@@ -16,7 +18,25 @@ export function getSetupStatus(env: Readonly<Record<string, string | undefined>>
     sourceConfigured: source === "direct" || Boolean(env.FIRECRAWL_API_KEY?.trim()),
     source,
     accessProtected: Boolean(env.APP_ACCESS_TOKEN?.trim()),
+    regionFallbackConfigured: Boolean(env.PRODUCT_FETCH_ENDPOINT?.trim()) || Boolean(env.FIRECRAWL_API_KEY?.trim()),
   };
+}
+
+/** Validates the optional relay template. It must be an HTTPS URL that contains the {url} placeholder. */
+export function parseFetchEndpoint(value: string | undefined): string {
+  const raw = value?.trim();
+  if (!raw) return "";
+  if (!raw.includes("{url}")) {
+    throw new AppError("SOURCE_NOT_CONFIGURED", "PRODUCT_FETCH_ENDPOINT 必须包含 {url} 占位符，用于传入商品页面地址。", 503);
+  }
+  let endpoint: URL;
+  try { endpoint = new URL(raw.replace("{url}", "https://example.invalid/")); } catch {
+    throw new AppError("SOURCE_NOT_CONFIGURED", "PRODUCT_FETCH_ENDPOINT 不是有效地址，请检查服务端配置。", 503);
+  }
+  if (endpoint.protocol !== "https:" || endpoint.username || endpoint.password) {
+    throw new AppError("SOURCE_NOT_CONFIGURED", "PRODUCT_FETCH_ENDPOINT 必须是不含账号信息的 HTTPS 地址。", 503);
+  }
+  return raw;
 }
 
 export function getServerConfig(env: Readonly<Record<string, string | undefined>> = process.env): ServerConfig {
@@ -43,5 +63,6 @@ export function getServerConfig(env: Readonly<Record<string, string | undefined>
     model: env.OPENAI_MODEL!.trim(),
     source: status.source,
     firecrawlKey: env.FIRECRAWL_API_KEY?.trim() || "",
+    fetchEndpoint: parseFetchEndpoint(env.PRODUCT_FETCH_ENDPOINT),
   };
 }

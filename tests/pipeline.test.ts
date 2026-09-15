@@ -5,7 +5,69 @@ import { consumeAnalysisStream } from "../lib/event-stream";
 import type { AnalysisEvent } from "../lib/contracts";
 import { createAnalyzeHandler, RequestGate } from "../lib/server/analyze-handler";
 import { generateContent } from "../lib/server/generate";
-import { config, link, product, validContent } from "./fixtures";
+import { fetchProduct, type HtmlFetcher } from "../lib/server/source";
+import { parseFetchEndpoint } from "../lib/server/config";
+import { config, link, product, validContent, html as fixtureHtml } from "./fixtures";
+
+const restrictedHtml = fixtureHtml.replace(
+  '<div id="corePrice_feature_div"><span class="a-price"><span class="a-offscreen">$29.95</span></span></div>',
+  '<div id="outOfStock">This item cannot be shipped to your selected delivery location.</div>',
+);
+
+test("a region-restricted price is recovered through the configured relay", async () => {
+  const seen: string[] = [];
+  const fetcher: HtmlFetcher = async (_link, provider) => { seen.push(provider); return provider === "direct" ? restrictedHtml : fixtureHtml; };
+  const result = await fetchProduct(link, { ...config, fetchEndpoint: "https://relay.invalid/fetch?url={url}" }, new AbortController().signal, fetcher);
+  assert.deepEqual(seen, ["direct", "relay"]);
+  assert.equal(result.price?.display, "$29.95");
+  assert.equal(result.source.provider, "relay");
+  assert.ok(result.warnings[0].includes("从其他地区取得"));
+});
+
+test("a relay result for a different ASIN is rejected instead of shown", async () => {
+  const fetcher: HtmlFetcher = async (_link, provider) => provider === "direct" ? restrictedHtml : fixtureHtml.replace(/B000TEST01/g, "B000OTHER9");
+  const result = await fetchProduct(link, { ...config, fetchEndpoint: "https://relay.invalid/fetch?url={url}" }, new AbortController().signal, fetcher);
+  assert.equal(result.price, null);
+  assert.equal(result.priceUnavailableReason, "region_restricted");
+  assert.ok(result.warnings.some((message) => message.includes("未成功")));
+});
+
+test("a failing relay keeps the facts already collected", async () => {
+  const fetcher: HtmlFetcher = async (_link, provider) => {
+    if (provider === "direct") return restrictedHtml;
+    throw new AppError("SOURCE_PROVIDER_ERROR", "中转失败", 502, true);
+  };
+  const result = await fetchProduct(link, { ...config, fetchEndpoint: "https://relay.invalid/fetch?url={url}" }, new AbortController().signal, fetcher);
+  assert.equal(result.title, "测试用折叠收纳盒");
+  assert.equal(result.price, null);
+  assert.ok(result.warnings.some((message) => message.includes("未成功")));
+});
+
+test("without a fallback the restriction is reported without extra retry noise", async () => {
+  const providers: string[] = [];
+  const fetcher: HtmlFetcher = async (_link, provider) => { providers.push(provider); return restrictedHtml; };
+  const result = await fetchProduct(link, config, new AbortController().signal, fetcher);
+  assert.deepEqual(providers, ["direct"]);
+  assert.ok(result.warnings.some((message) => message.includes("无法配送")));
+  assert.ok(!result.warnings.some((message) => message.includes("未成功")));
+});
+
+test("an available price never triggers a fallback request", async () => {
+  const providers: string[] = [];
+  const fetcher: HtmlFetcher = async (_link, provider) => { providers.push(provider); return fixtureHtml; };
+  const result = await fetchProduct(link, { ...config, fetchEndpoint: "https://relay.invalid/fetch?url={url}" }, new AbortController().signal, fetcher);
+  assert.deepEqual(providers, ["direct"]);
+  assert.equal(result.price?.display, "$29.95");
+});
+
+test("the relay template must be an HTTPS address containing the url placeholder", () => {
+  assert.equal(parseFetchEndpoint(undefined), "");
+  assert.equal(parseFetchEndpoint("  "), "");
+  assert.equal(parseFetchEndpoint("https://relay.example/fetch?url={url}"), "https://relay.example/fetch?url={url}");
+  for (const invalid of ["https://relay.example/fetch", "http://relay.example/fetch?url={url}", "https://user:pass@relay.example/?url={url}", "not-a-url{url}"]) {
+    assert.throws(() => parseFetchEndpoint(invalid), (error: unknown) => error instanceof AppError && error.code === "SOURCE_NOT_CONFIGURED", invalid);
+  }
+});
 
 function chatResponse(content: string, finish_reason = "stop") {
   return Response.json({ choices: [{ message: { content }, finish_reason }] });

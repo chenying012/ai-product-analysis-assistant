@@ -23,7 +23,7 @@ export const productSchema = z.object({
   specifications: z.array(z.object({ name: z.string(), value: z.string() })),
   description: z.string().nullable(),
   evidence: z.array(evidenceSchema),
-  source: z.object({ provider: z.enum(["direct", "firecrawl"]), fetchedAt: z.string() }),
+  source: z.object({ provider: z.enum(["direct", "firecrawl", "relay"]), fetchedAt: z.string() }),
   warnings: z.array(z.string()),
 });
 
@@ -66,6 +66,8 @@ export type SetupStatus = {
   sourceConfigured: boolean;
   source: "direct" | "firecrawl";
   accessProtected: boolean;
+  /** True when a relay or Firecrawl key can retry a page that the primary region cannot price. */
+  regionFallbackConfigured: boolean;
 };
 
 export function scriptText(script: Content["script"]): string {

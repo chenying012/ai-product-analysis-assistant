@@ -22,4 +22,4 @@ export const validContent: Content = {
   sellingPoints: [{ title: "可折叠收纳", description: "将可折叠结构转化为闲置时便于收纳的收益。", evidenceIds: ["F5"] }],
   script: { hook: "空收纳盒也很占地方？", body: "看看这种可折叠的收纳盒，不用时可以折起来收好，侧边提手也方便日常移动。如果你正在整理有限的居家空间，可以先对照需要收纳的物品，确认尺寸是否合适。", evidenceIds: ["F5", "F6"] },
 };
-export const config = { apiKey: "unit-test-key-not-a-real-secret", baseUrl: "https://model.invalid/v1", model: "test-model", source: "direct" as const, firecrawlKey: "" };
+export const config = { apiKey: "unit-test-key-not-a-real-secret", baseUrl: "https://model.invalid/v1", model: "test-model", source: "direct" as const, firecrawlKey: "", fetchEndpoint: "" };

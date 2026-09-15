@@ -142,8 +142,11 @@ test("rejects unsupported evidence, long hook, English output and wrong schema",
 });
 test("setup state exposes booleans, never model or scraping secrets", () => {
   const state = getSetupStatus({ OPENAI_API_KEY: "secret-a", OPENAI_MODEL: "model", FIRECRAWL_API_KEY: "secret-b", APP_ACCESS_TOKEN: "private-token" });
-  assert.deepEqual(state, { modelConfigured: true, sourceConfigured: true, source: "direct", accessProtected: true });
+  assert.deepEqual(state, { modelConfigured: true, sourceConfigured: true, source: "direct", accessProtected: true, regionFallbackConfigured: true });
   assert.ok(!JSON.stringify(state).includes("secret"));
+  const bare = getSetupStatus({ OPENAI_API_KEY: "k", OPENAI_MODEL: "m" });
+  assert.equal(bare.regionFallbackConfigured, false);
+  assert.equal(getSetupStatus({ PRODUCT_FETCH_ENDPOINT: "https://relay.example/?url={url}" }).regionFallbackConfigured, true);
 });
 test("requires explicit model configuration and validates provider settings", () => {
   assert.throws(() => getServerConfig({}), codeIs("MODEL_NOT_CONFIGURED"));

@@ -60,7 +60,7 @@ export function safeImageUrl(value: unknown): string | null {
   } catch { return null; }
 }
 
-export function parseProductHtml(html: string, link: AmazonLink, provider: "direct" | "firecrawl"): Product {
+export function parseProductHtml(html: string, link: AmazonLink, provider: "direct" | "firecrawl" | "relay"): Product {
   const $ = load(html);
   $("script:not([type='application/ld+json']), style, noscript").remove();
   const nodes: Record<string, unknown>[] = [];
@@ -162,7 +162,7 @@ export function parseProductHtml(html: string, link: AmazonLink, provider: "dire
     source: { provider, fetchedAt: new Date().toISOString() },
     warnings: [
       ...(priceUnavailableReason === "region_restricted"
-        ? ["Amazon 判定该商品无法配送到本次采集所在地区，因此页面未展示价格。页面上其他金额属于推荐位的其他商品，未采用。可改用 Firecrawl 等能从其他地区采集的来源获取价格。"] : []),
+        ? ["Amazon 判定该商品无法配送到本次采集所在地区，页面中完全没有下发本商品价格；页面上其他金额属于推荐位的其他商品，未采用。可配置 PRODUCT_FETCH_ENDPOINT 或 Firecrawl 从其他地区取回价格，或把服务部署到可配送地区。"] : []),
       ...(priceUnavailableReason === "out_of_stock" ? ["页面显示该商品当前缺货，未展示可确认的价格。"] : []),
       ...(priceUnavailableReason === "not_found" ? ["页面未展示可确认的价格，未使用默认金额补齐。"] : []),
       ...(variant && !price ? [`该商品有 ${variant.total} 个型号或规格${variant.name ? `，本次分析的是「${variant.name}」` : ""}；不同型号价格可能不同，未借用其他型号的价格填充。`] : []),
