@@ -196,6 +196,33 @@ h1 { font-size: clamp(36px, 4vw, 49px); line-height: 1.35; font-weight: 650; let
 .result-disclaimer { display: flex; gap: 7px; align-items: flex-start; font-size: 10px; line-height: 1.8; color: #9aa58f; margin-top: 20px; }
 .result-disclaimer svg { flex-shrink: 0; margin-top: 2px; }
 .partial-result { display: flex; align-items: center; gap: 12px; padding: 23px; border: 1px dashed #dae2d1; border-radius: 11px; margin-top: 18px; color: #92a082; font-size: 12px; line-height: 1.8; }
+.image-insight { border-top: 1px solid #edf0e7; padding-top: 16px; margin-bottom: 18px; }
+.image-insight h4 { display: flex; align-items: center; gap: 7px; font-size: 12px; font-weight: 550; color: #4e795e; }
+.image-insight h4 > span { color: #a6b098; font-size: 9px; font-weight: 400; }
+.image-insight ul { margin: 11px 0 0; padding: 0; list-style: none; }
+.image-insight li { display: flex; gap: 11px; font-size: 11px; color: #78886e; line-height: 1.8; margin-top: 7px; }
+.image-insight code { color: #a08a5a; min-width: 23px; }
+.quality-card { margin-top: 18px; background: #fff; border: 1px solid var(--border); border-radius: 15px; padding: 22px 26px; }
+.quality-card.quality-warn { border-color: #e6d6b4; background: #fdfaf3; }
+.quality-heading { display: flex; justify-content: space-between; align-items: center; gap: 14px; flex-wrap: wrap; }
+.quality-heading h3 { display: flex; align-items: center; gap: 8px; font-size: 16px; font-weight: 550; }
+.quality-pass .quality-heading svg { color: #4e9271; }
+.quality-warn .quality-heading svg { color: #b69b64; }
+.quality-verdict { font-size: 10px; color: #8a9f80; border: 1px solid var(--border); border-radius: 7px; padding: 6px 10px; }
+.quality-warn .quality-verdict { color: #9c8046; border-color: #e6d6b4; background: #fff; }
+.quality-metrics { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; margin-top: 18px; }
+.quality-metrics > div { border: 1px solid #edf0e7; border-radius: 9px; padding: 11px 13px; }
+.quality-metrics span { display: flex; align-items: center; gap: 5px; font-size: 9px; color: #97a18c; }
+.quality-metrics strong { display: block; margin-top: 5px; font-size: 14px; font-weight: 550; color: var(--green); }
+.quality-issues { margin: 16px 0 0; padding: 0; list-style: none; }
+.quality-issues li { display: flex; gap: 10px; align-items: flex-start; border-top: 1px solid #edf0e7; padding-top: 12px; margin-top: 12px; font-size: 11px; color: #6d7d68; }
+.quality-issues strong { font-weight: 550; color: #4b6844; margin-right: 4px; }
+.quality-issues p { margin-top: 5px; color: #8a9880; line-height: 1.8; }
+.quality-tag { flex: 0 0 auto; border-radius: 5px; padding: 3px 7px; font-size: 9px; }
+.quality-tag.blocking { background: #f7ecd6; color: #96773c; }
+.quality-tag.advisory { background: #eef1ea; color: #85907c; }
+.quality-note { margin-top: 16px; font-size: 9px; line-height: 1.8; color: #9aa58f; }
+.status-dot.amber { background: #b69b64; }
 
 .settings-dialog { border: 1px solid #e0e7da; border-radius: 18px; padding: 0; width: min(610px, calc(100% - 32px)); max-height: calc(100dvh - 48px); color: var(--ink); background: white; box-shadow: 0 25px 90px #153a2930; }
 .settings-dialog::backdrop { background: #162f254a; backdrop-filter: blur(4px); }
@@ -227,6 +254,7 @@ code { font-family: "SFMono-Regular", Consolas, monospace; font-size: .92em; ove
   .hero-description { font-size: 12px; }
   .source-caption { display: none; }
   .analysis-grid { grid-template-columns: repeat(2, 1fr); }
+  .quality-metrics { grid-template-columns: repeat(2, 1fr); }
   .feature-visual { padding-left: 15px; }
   .visual-lines { width: 58px; }
   .visual-tags { left: 12px; gap: 4px; }
@@ -285,6 +313,8 @@ code { font-family: "SFMono-Regular", Consolas, monospace; font-size: .92em; ove
   .product-info h3 { font-size: 17px; }
   .product-body { padding: 0 21px 20px; }
   .spec-grid, .analysis-grid { grid-template-columns: 1fr; }
+  .quality-card { padding: 18px 16px; }
+  .quality-metrics { grid-template-columns: repeat(2, 1fr); gap: 9px; }
   .feature-list li { font-size: 11px; }
   .result-state { font-size: 9px; }
   .insight-card { padding: 19px; }

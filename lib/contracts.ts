@@ -19,6 +19,8 @@ export const productSchema = z.object({
   priceUnavailableReason: z.enum(["region_restricted", "out_of_stock", "not_found"]).nullable(),
   variant: z.object({ name: z.string().nullable(), total: z.number().int().min(2) }).nullable(),
   imageUrl: z.string().url().nullable(),
+  /** Attributes read from the product photo by a vision model. Never mixed into page text facts. */
+  imageInsight: z.object({ observations: z.array(z.string()), model: z.string() }).nullable(),
   features: z.array(z.string()),
   specifications: z.array(z.object({ name: z.string(), value: z.string() })),
   description: z.string().nullable(),
@@ -45,19 +47,43 @@ export const contentSchema = z.object({
   }).strict(),
 }).strict();
 
+export const qualityIssueSchema = z.object({
+  code: z.enum(["absolute_claim", "guaranteed_effect", "unsupported_number", "price_claim", "health_claim", "unsupported_comparison", "purchase_pressure", "hook_too_slow"]),
+  severity: z.enum(["blocking", "advisory"]),
+  field: z.string(),
+  excerpt: z.string(),
+  message: z.string(),
+});
+
+export const qualitySchema = z.object({
+  passed: z.boolean(),
+  issues: z.array(qualityIssueSchema),
+  speech: z.object({
+    charactersPerSecond: z.number(),
+    hookSeconds: z.number(),
+    totalSeconds: z.number(),
+    hookWithinFiveSeconds: z.boolean(),
+  }),
+  evidence: z.object({ cited: z.number().int(), total: z.number().int() }),
+  /** Number of automatic corrections requested from the model before this result was accepted. */
+  revisions: z.number().int().min(0),
+});
+
 export const publicErrorSchema = z.object({
   code: z.string(), message: z.string(), retryable: z.boolean(),
 });
 
 export const eventSchema = z.discriminatedUnion("type", [
-  z.object({ type: z.literal("stage"), stage: z.enum(["fetching", "analyzing"]) }),
+  z.object({ type: z.literal("stage"), stage: z.enum(["fetching", "inspecting", "analyzing", "reviewing"]) }),
   z.object({ type: z.literal("product"), product: productSchema }),
-  z.object({ type: z.literal("result"), content: contentSchema }),
+  z.object({ type: z.literal("result"), content: contentSchema, quality: qualitySchema }),
   z.object({ type: z.literal("error"), error: publicErrorSchema }),
 ]);
 
 export type Product = z.infer<typeof productSchema>;
 export type Content = z.infer<typeof contentSchema>;
+export type Quality = z.infer<typeof qualitySchema>;
+export type QualityIssueRecord = z.infer<typeof qualityIssueSchema>;
 export type AnalysisPoint = z.infer<typeof pointSchema>;
 export type AnalysisEvent = z.infer<typeof eventSchema>;
 export type PublicError = z.infer<typeof publicErrorSchema>;
@@ -68,6 +94,8 @@ export type SetupStatus = {
   accessProtected: boolean;
   /** True when a relay or Firecrawl key can retry a page that the primary region cannot price. */
   regionFallbackConfigured: boolean;
+  /** True when a vision model is configured to read the product photo. */
+  imageAnalysisConfigured: boolean;
 };
 
 export function scriptText(script: Content["script"]): string {

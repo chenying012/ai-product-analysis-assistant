@@ -1,13 +1,19 @@
 "use client";
 
 import { useEffect, useRef, useState, type FormEvent } from "react";
-import { ArrowRight, ArrowUpRight, AudioLines, Box, Check, ChevronRight, CircleHelp, Copy, FileText, Layers3, Link2, LoaderCircle, Package, Settings2, ShieldCheck, Sparkles, Target, Users, X, AlertCircle, RefreshCw, Lightbulb } from "lucide-react";
-import { characterCount, scriptText, type AnalysisPoint, type Content, type Product, type PublicError, type SetupStatus } from "@/lib/contracts";
+import { ArrowRight, ArrowUpRight, AudioLines, Box, Check, ChevronRight, CircleHelp, Copy, FileText, Layers3, Link2, LoaderCircle, Package, Settings2, ShieldCheck, Sparkles, Target, Users, X, AlertCircle, RefreshCw, Lightbulb, BadgeCheck, ShieldAlert, Timer, Image as ImageIcon } from "lucide-react";
+import { characterCount, scriptText, type AnalysisPoint, type Content, type Product, type PublicError, type Quality, type SetupStatus } from "@/lib/contracts";
 import { normalizeAmazonUrl } from "@/lib/amazon-url";
 import { consumeAnalysisStream } from "@/lib/event-stream";
 import { publicError } from "@/lib/errors";
 
-type Stage = "idle" | "fetching" | "analyzing" | "done";
+type Stage = "idle" | "fetching" | "inspecting" | "analyzing" | "reviewing" | "done";
+const stageCopy: Record<string, { title: string; detail: string }> = {
+  fetching: { title: "正在获取商品的真实信息", detail: "识别名称、功能与规格，不用标题猜测商品详情。" },
+  inspecting: { title: "正在识别商品主图", detail: "只记录图片中可见的外观特征，作为独立编号的依据。" },
+  analyzing: { title: "正在分析用户价值，构思中文口播", detail: "基于本次页面信息生成，完成后检查结构、引用与文案字数。" },
+  reviewing: { title: "正在做内容质量检查", detail: "核对夸大表述、无依据数字与口播时长，必要时要求模型修正。" },
+};
 const examples = [
   { label: "题目示例 01", url: "https://www.amazon.com/dp/B0F6YQ96L5" },
   { label: "题目示例 02", url: "https://www.amazon.com/dp/B0CXT9RSGQ" },
@@ -21,6 +27,7 @@ export default function ProductAssistant({ initialSetup }: { initialSetup: Setup
   const [busy, setBusy] = useState(false);
   const [product, setProduct] = useState<Product | null>(null);
   const [content, setContent] = useState<Content | null>(null);
+  const [quality, setQuality] = useState<Quality | null>(null);
   const [error, setError] = useState<PublicError | null>(null);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [configFeedback, setConfigFeedback] = useState("");
@@ -40,6 +47,7 @@ export default function ProductAssistant({ initialSetup }: { initialSetup: Setup
     setError(null);
     setProduct(null);
     setContent(null);
+    setQuality(null);
     try { normalizeAmazonUrl(url); } catch (issue) { setError(publicError(issue)); return; }
     if (!ready) {
       setError({ code: "MODEL_NOT_CONFIGURED", message: "先完成服务端接口配置，就可以开始真实分析。我们不会用预设结果替代模型输出。", retryable: false });
@@ -59,11 +67,12 @@ export default function ProductAssistant({ initialSetup }: { initialSetup: Setup
       await consumeAnalysisStream(response, (message) => {
         if (message.type === "stage") setStage(message.stage);
         if (message.type === "product") setProduct(message.product);
-        if (message.type === "result") { setContent(message.content); setStage("done"); }
-        if (message.type === "error") { setContent(null); setError(message.error); setStage("idle"); }
+        if (message.type === "result") { setContent(message.content); setQuality(message.quality); setStage("done"); }
+        if (message.type === "error") { setContent(null); setQuality(null); setError(message.error); setStage("idle"); }
       });
     } catch (issue) {
       setContent(null);
+      setQuality(null);
       setStage("idle");
       setError(controller.signal.aborted
         ? { code: "CANCELLED", message: "已取消分析。可以修改链接后重新开始，已获取的商品信息保留在下方。", retryable: true }
@@ -113,9 +122,9 @@ export default function ProductAssistant({ initialSetup }: { initialSetup: Setup
 
       {error && <div className="error-panel" role="alert"><AlertCircle size={19} /><div><strong>{error.code === "CANCELLED" ? "分析已取消" : "这次分析还没有完成"}</strong><p>{error.message}</p>{error.code.startsWith("MODEL_") || error.code.startsWith("SOURCE_") ? <button className="inline-link" onClick={() => setSettingsOpen(true)}>检查接口配置 <ArrowUpRight size={12} /></button> : null}</div><button className="icon-button" aria-label="关闭提示" onClick={() => setError(null)}><X size={16} /></button></div>}
 
-      {busy && <div className="progress-panel" role="status" aria-live="polite"><div className="progress-spinner"><LoaderCircle size={22} className="spin" /></div><div><strong>{stage === "fetching" ? "正在获取商品的真实信息" : "正在分析用户价值，构思中文口播"}</strong><p>{stage === "fetching" ? "识别名称、功能与规格，不用标题猜测商品详情。" : "基于本次页面信息生成，完成后检查结构、引用与文案字数。"}</p></div><button className="text-button" onClick={() => abortRef.current?.abort()}>取消</button></div>}
+      {busy && <div className="progress-panel" role="status" aria-live="polite"><div className="progress-spinner"><LoaderCircle size={22} className="spin" /></div><div><strong>{(stageCopy[stage] ?? stageCopy.analyzing).title}</strong><p>{(stageCopy[stage] ?? stageCopy.analyzing).detail}</p></div><button className="text-button" onClick={() => abortRef.current?.abort()}>取消</button></div>}
 
-      {product ? <section className="results" aria-labelledby="result-heading"><div className="section-heading"><div><span className="section-kicker">PRODUCT WORKSPACE</span><h2 id="result-heading">你的产品，逐层看清。</h2></div><span className="result-state"><span className={`status-dot ${content ? "green" : ""}`} />{content ? "分析已生成" : "商品信息已获取"}</span></div><ProductDetails key={`${product.url}-${product.source.fetchedAt}`} product={product} />{content ? <><div className="analysis-section"><div className="subsection-heading"><h3><Target size={18} /> 产品分析</h3><span className="inference-label">基于页面信息的 AI 推断</span></div><div className="analysis-grid"><InsightGroup title="目标人群" icon={<Users size={18} />} points={content.audiences} /><InsightGroup title="使用场景" icon={<Layers3 size={18} />} points={content.scenarios} /><InsightGroup title="用户痛点" icon={<Target size={18} />} points={content.painPoints} /><InsightGroup title="核心卖点" icon={<Lightbulb size={18} />} points={content.sellingPoints} /></div></div><ScriptCard content={content} /><p className="result-disclaimer"><CircleHelp size={14} /> AI 分析与文案供创作参考，不代表实测结论。发布前请核对商品事实，并按实际语速确认口播时长。</p></> : !busy && <div className="partial-result"><AudioLines size={22} /><span>商品档案已保留。解决上方提示后重新分析，即可继续生成产品洞察与口播。</span></div>}</section> : <EmptyState />}
+      {product ? <section className="results" aria-labelledby="result-heading"><div className="section-heading"><div><span className="section-kicker">PRODUCT WORKSPACE</span><h2 id="result-heading">你的产品，逐层看清。</h2></div><span className="result-state"><span className={`status-dot ${content ? (quality && !quality.passed ? "amber" : "green") : ""}`} />{content ? (quality && !quality.passed ? "已生成 · 有待修正提示" : "分析已生成") : "商品信息已获取"}</span></div><ProductDetails key={`${product.url}-${product.source.fetchedAt}`} product={product} />{content ? <><div className="analysis-section"><div className="subsection-heading"><h3><Target size={18} /> 产品分析</h3><span className="inference-label">基于页面信息的 AI 推断</span></div><div className="analysis-grid"><InsightGroup title="目标人群" icon={<Users size={18} />} points={content.audiences} /><InsightGroup title="使用场景" icon={<Layers3 size={18} />} points={content.scenarios} /><InsightGroup title="用户痛点" icon={<Target size={18} />} points={content.painPoints} /><InsightGroup title="核心卖点" icon={<Lightbulb size={18} />} points={content.sellingPoints} /></div></div><ScriptCard content={content} quality={quality} />{quality && <QualityPanel quality={quality} />}<p className="result-disclaimer"><CircleHelp size={14} /> AI 分析与文案供创作参考，不代表实测结论。发布前请核对商品事实，并按实际语速确认口播时长。</p></> : !busy && <div className="partial-result"><AudioLines size={22} /><span>商品档案已保留。解决上方提示后重新分析，即可继续生成产品洞察与口播。</span></div>}</section> : <EmptyState />}
 
       <footer className="page-footer"><span>PRODUCT LENS<span className="footer-separator">/</span>从信息，到理解，再到表达。</span><span>基础版 <span className="footer-dot">·</span> 为真实产品而写</span></footer>
     </main>
@@ -147,18 +156,40 @@ function EmptyState() {
 
 function ProductDetails({ product }: { product: Product }) {
   const [imageFailed, setImageFailed] = useState(false);
-  return <article className="product-card"><div className="product-main"><div className="product-image">{product.imageUrl && !imageFailed ? <img src={product.imageUrl} alt={product.title} onError={() => setImageFailed(true)} referrerPolicy="no-referrer" /> : <div className="image-fallback"><Package size={42} strokeWidth={1.1} /><span>商品图片暂未取得</span></div>}</div><div className="product-info"><div className="product-overline"><span>产品档案</span><span>{product.marketplace}</span></div><h3>{product.title}</h3><div className="product-tags"><span>ASIN · {product.asin}</span>{product.brand && <span>{product.brand}</span>}{product.variant?.name && <span>型号 · {product.variant.name}</span>}{product.variant && !product.variant.name && <span>{product.variant.total} 个型号可选</span>}</div><div className="price-row"><span className="price">{product.price?.display || (product.priceUnavailableReason === "region_restricted" ? "价格未展示（本地区不可配送）" : product.priceUnavailableReason === "out_of_stock" ? "价格未展示（页面显示缺货）" : "价格未取得")}</span><span>页面展示价 · 以商品页为准</span></div>{product.category && <p className="category-text">{product.category}</p>}<a className="inline-link" href={product.url} target="_blank" rel="noopener noreferrer">查看原商品页面 <ArrowUpRight size={13} /></a></div></div><div className="product-body">{product.features.length > 0 && <section><h4>核心功能</h4><ul className="feature-list">{product.features.map((feature, index) => <li key={index}><Check size={13} /><span>{feature}</span></li>)}</ul></section>}{product.specifications.length > 0 && <details className="detail-accordion"><summary>规格参数 <span>{product.specifications.length} 项</span></summary><dl className="spec-grid">{product.specifications.map((spec) => <div key={spec.name}><dt>{spec.name}</dt><dd>{spec.value}</dd></div>)}</dl></details>}{!product.features.length && product.description && <p className="product-description">{product.description}</p>}<details className="detail-accordion evidence-accordion"><summary>本次采集依据 <span>{product.evidence.length} 条</span></summary><ol>{product.evidence.map((fact) => <li key={fact.id}><code>{fact.id}</code><span><strong>{fact.label}</strong>{fact.value}</span></li>)}</ol></details><div className="source-note"><span><ShieldCheck size={13} />{product.source.provider === "direct" ? "Amazon 公开页面" : product.source.provider === "relay" ? "经取回中转的 Amazon 页面" : "Firecrawl 采集的商品页面"}</span><time dateTime={product.source.fetchedAt}>{new Date(product.source.fetchedAt).toLocaleString("zh-CN", { hour12: false })}</time></div>{product.warnings.map((warning) => <p className="field-warning" key={warning}>{warning}</p>)}</div></article>;
+  return <article className="product-card"><div className="product-main"><div className="product-image">{product.imageUrl && !imageFailed ? <img src={product.imageUrl} alt={product.title} onError={() => setImageFailed(true)} referrerPolicy="no-referrer" /> : <div className="image-fallback"><Package size={42} strokeWidth={1.1} /><span>商品图片暂未取得</span></div>}</div><div className="product-info"><div className="product-overline"><span>产品档案</span><span>{product.marketplace}</span></div><h3>{product.title}</h3><div className="product-tags"><span>ASIN · {product.asin}</span>{product.brand && <span>{product.brand}</span>}{product.variant?.name && <span>型号 · {product.variant.name}</span>}{product.variant && !product.variant.name && <span>{product.variant.total} 个型号可选</span>}</div><div className="price-row"><span className="price">{product.price?.display || (product.priceUnavailableReason === "region_restricted" ? "价格未展示（本地区不可配送）" : product.priceUnavailableReason === "out_of_stock" ? "价格未展示（页面显示缺货）" : "价格未取得")}</span><span>页面展示价 · 以商品页为准</span></div>{product.category && <p className="category-text">{product.category}</p>}<a className="inline-link" href={product.url} target="_blank" rel="noopener noreferrer">查看原商品页面 <ArrowUpRight size={13} /></a></div></div><div className="product-body">{product.features.length > 0 && <section><h4>核心功能</h4><ul className="feature-list">{product.features.map((feature, index) => <li key={index}><Check size={13} /><span>{feature}</span></li>)}</ul></section>}{product.specifications.length > 0 && <details className="detail-accordion"><summary>规格参数 <span>{product.specifications.length} 项</span></summary><dl className="spec-grid">{product.specifications.map((spec) => <div key={spec.name}><dt>{spec.name}</dt><dd>{spec.value}</dd></div>)}</dl></details>}{!product.features.length && product.description && <p className="product-description">{product.description}</p>}{product.imageInsight && <section className="image-insight"><h4><ImageIcon size={14} /> 图片可见信息 <span>视觉模型 · {product.imageInsight.model}</span></h4><ul>{product.imageInsight.observations.map((item, index) => <li key={index}><code>V{index + 1}</code><span>{item}</span></li>)}</ul></section>}<details className="detail-accordion evidence-accordion"><summary>本次采集依据 <span>{product.evidence.length} 条</span></summary><ol>{product.evidence.map((fact) => <li key={fact.id}><code>{fact.id}</code><span><strong>{fact.label}</strong>{fact.value}</span></li>)}</ol></details><div className="source-note"><span><ShieldCheck size={13} />{product.source.provider === "direct" ? "Amazon 公开页面" : product.source.provider === "relay" ? "经取回中转的 Amazon 页面" : "Firecrawl 采集的商品页面"}</span><time dateTime={product.source.fetchedAt}>{new Date(product.source.fetchedAt).toLocaleString("zh-CN", { hour12: false })}</time></div>{product.warnings.map((warning) => <p className="field-warning" key={warning}>{warning}</p>)}</div></article>;
 }
 
 function InsightGroup({ title, icon, points }: { title: string; icon: React.ReactNode; points: AnalysisPoint[] }) {
   return <article className="insight-card"><h4>{icon}{title}</h4>{points.map((point, index) => <div className="insight-point" key={index}><h5>{point.title}</h5><p>{point.description}</p><span className="evidence-ref">依据 {point.evidenceIds.join(" · ")}</span></div>)}</article>;
 }
 
-function ScriptCard({ content }: { content: Content }) {
+function ScriptCard({ content, quality }: { content: Content; quality: Quality | null }) {
   const [copyState, setCopyState] = useState<"idle" | "done" | "failed">("idle");
   const text = scriptText(content.script);
   async function copy() {
     try { await navigator.clipboard.writeText(text); setCopyState("done"); } catch { setCopyState("failed"); }
   }
-  return <article className="script-card"><div className="script-heading"><div><span className="section-kicker">READY TO SAY IT</span><h3><AudioLines size={19} /> 中文口播文案</h3></div><span className="word-count">{characterCount(text)} <span>/ 150 字</span></span></div><div className="script-content"><span className="hook-label">开头钩子 · 建议前 5 秒</span><p className="script-hook">{content.script.hook}</p><p className="script-body">{content.script.body}</p></div><div className="script-bottom"><span>依据 {content.script.evidenceIds.join(" · ")}</span><button className="copy-button" onClick={copy}>{copyState === "done" ? <Check size={16} /> : <Copy size={16} />}{copyState === "done" ? "已复制文案" : "复制口播文案"}</button></div><p className="copy-feedback" role="status">{copyState === "failed" ? "自动复制未成功，请选中文案手动复制。" : copyState === "done" ? "已复制钩子和正文，不包含标题与证据编号。" : "字数包含钩子、正文、标点与换行。"}</p></article>;
+  return <article className="script-card"><div className="script-heading"><div><span className="section-kicker">READY TO SAY IT</span><h3><AudioLines size={19} /> 中文口播文案</h3></div><span className="word-count">{characterCount(text)} <span>/ 150 字</span></span></div><div className="script-content"><span className="hook-label">开头钩子 · {quality ? <>估算 {quality.speech.hookSeconds} 秒{quality.speech.hookWithinFiveSeconds ? "，在 5 秒内" : "，超过 5 秒"}</> : "建议前 5 秒"}</span><p className="script-hook">{content.script.hook}</p><p className="script-body">{content.script.body}</p></div><div className="script-bottom"><span>依据 {content.script.evidenceIds.join(" · ")}{quality && <> · 全文估算 {quality.speech.totalSeconds} 秒</>}</span><button className="copy-button" onClick={copy}>{copyState === "done" ? <Check size={16} /> : <Copy size={16} />}{copyState === "done" ? "已复制文案" : "复制口播文案"}</button></div><p className="copy-feedback" role="status">{copyState === "failed" ? "自动复制未成功，请选中文案手动复制。" : copyState === "done" ? "已复制钩子和正文，不包含标题与证据编号。" : `字数包含钩子、正文、标点与换行${quality ? `；时长按每秒 ${quality.speech.charactersPerSecond} 字估算，实际以真人语速为准` : ""}。`}</p></article>;
+}
+
+function QualityPanel({ quality }: { quality: Quality }) {
+  const blocking = quality.issues.filter((issue) => issue.severity === "blocking");
+  const advisory = quality.issues.filter((issue) => issue.severity === "advisory");
+  return <article className={`quality-card ${quality.passed ? "quality-pass" : "quality-warn"}`}>
+    <div className="quality-heading">
+      <div><span className="section-kicker">CONTENT QUALITY CHECK</span><h3>{quality.passed ? <BadgeCheck size={19} /> : <ShieldAlert size={19} />} 内容质量检查</h3></div>
+      <span className="quality-verdict">{quality.passed ? "未发现需要拦截的问题" : `${blocking.length} 项待修正`}</span>
+    </div>
+    <div className="quality-metrics">
+      <div><span>引用依据</span><strong>{quality.evidence.cited} / {quality.evidence.total} 条</strong></div>
+      <div><span><Timer size={13} /> 钩子时长</span><strong>{quality.speech.hookSeconds} 秒</strong></div>
+      <div><span>全文时长</span><strong>{quality.speech.totalSeconds} 秒</strong></div>
+      <div><span>自动修正</span><strong>{quality.revisions} 次</strong></div>
+    </div>
+    {blocking.length > 0 && <ul className="quality-issues">{blocking.map((issue, index) => <li key={`b${index}`}><span className="quality-tag blocking">待修正</span><div><strong>{issue.field}</strong>「{issue.excerpt}」<p>{issue.message}</p></div></li>)}</ul>}
+    {advisory.length > 0 && <ul className="quality-issues">{advisory.map((issue, index) => <li key={`a${index}`}><span className="quality-tag advisory">提示</span><div><strong>{issue.field}</strong>「{issue.excerpt}」<p>{issue.message}</p></div></li>)}</ul>}
+    <p className="quality-note">{quality.passed
+      ? "已自动核对绝对化措辞、效果承诺、同类对比、材料外数字与价格宣称；检查基于本次采集材料，不代表商品事实已被独立验证。"
+      : "以上问题在自动修正后仍然存在，因此如实保留并标注，没有替你改写模型输出。发布前请人工调整这些表述。"}</p>
+  </article>;
 }

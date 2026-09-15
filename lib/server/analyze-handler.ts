@@ -1,9 +1,10 @@
 import { createHash, timingSafeEqual } from "node:crypto";
 import { normalizeAmazonUrl } from "../amazon-url";
-import { requestSchema, type AnalysisEvent, type Content, type Product } from "../contracts";
+import { requestSchema, type AnalysisEvent, type Product } from "../contracts";
 import { AppError, publicError } from "../errors";
 import { getServerConfig, type ServerConfig } from "./config";
-import { generateContent } from "./generate";
+import { generateContent, type GenerationResult } from "./generate";
+import { inspectProductImage, withImageEvidence } from "./vision";
 import { fetchProduct, readResponseText } from "./source";
 
 export class RequestGate {
@@ -24,7 +25,8 @@ const gate = new RequestGate();
 type Dependencies = {
   config: () => ServerConfig;
   product: typeof fetchProduct;
-  generate: (product: Product, config: ServerConfig, signal: AbortSignal) => Promise<Content>;
+  generate: (product: Product, config: ServerConfig, signal: AbortSignal) => Promise<GenerationResult>;
+  inspectImage: (product: Product, config: ServerConfig, signal: AbortSignal) => Promise<Product["imageInsight"]>;
   accessToken: () => string;
   gate: RequestGate;
 };
@@ -33,6 +35,7 @@ const defaults: Dependencies = {
   config: getServerConfig,
   product: fetchProduct,
   generate: generateContent,
+  inspectImage: inspectProductImage,
   accessToken: () => process.env.APP_ACCESS_TOKEN?.trim() || "",
   gate,
 };
@@ -73,13 +76,18 @@ export function createAnalyzeHandler(dependencies: Partial<Dependencies> = {}) {
           void (async () => {
             try {
               emit({ type: "stage", stage: "fetching" });
-              const product = await deps.product(link, config, signal);
+              let product = await deps.product(link, config, signal);
               signal.throwIfAborted();
+              if (config.visionModel && product.imageUrl) {
+                emit({ type: "stage", stage: "inspecting" });
+                product = withImageEvidence(product, await deps.inspectImage(product, config, signal));
+                signal.throwIfAborted();
+              }
               emit({ type: "product", product });
               emit({ type: "stage", stage: "analyzing" });
-              const content = await deps.generate(product, config, signal);
+              const { content, quality } = await deps.generate(product, config, signal);
               signal.throwIfAborted();
-              emit({ type: "result", content });
+              emit({ type: "result", content, quality });
             } catch (error) {
               if (!closed) {
                 const safe = publicError(error);

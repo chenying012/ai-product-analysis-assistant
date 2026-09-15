@@ -156,7 +156,7 @@ export function parseProductHtml(html: string, link: AmazonLink, provider: "dire
     ...(description ? [{ label: "页面商品说明", value: description.slice(0, 1600) }] : []),
   ];
   return {
-    ...link, title, brand: brand || null, category: category || null, price, priceUnavailableReason, variant, imageUrl,
+    ...link, title, brand: brand || null, category: category || null, price, priceUnavailableReason, variant, imageUrl, imageInsight: null,
     features, specifications, description: description.slice(0, 1600) || null,
     evidence: facts.map((fact, index) => ({ id: `F${index + 1}`, ...fact })),
     source: { provider, fetchedAt: new Date().toISOString() },

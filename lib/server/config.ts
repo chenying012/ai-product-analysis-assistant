@@ -9,6 +9,8 @@ export type ServerConfig = {
   firecrawlKey: string;
   /** Optional relay that fetches the product page from another region. Empty when not configured. */
   fetchEndpoint: string;
+  /** Optional vision-capable model used to read the product photo. Empty disables image analysis. */
+  visionModel: string;
 };
 
 export function getSetupStatus(env: Readonly<Record<string, string | undefined>> = process.env): SetupStatus {
@@ -19,6 +21,7 @@ export function getSetupStatus(env: Readonly<Record<string, string | undefined>>
     source,
     accessProtected: Boolean(env.APP_ACCESS_TOKEN?.trim()),
     regionFallbackConfigured: Boolean(env.PRODUCT_FETCH_ENDPOINT?.trim()) || Boolean(env.FIRECRAWL_API_KEY?.trim()),
+    imageAnalysisConfigured: Boolean(env.OPENAI_VISION_MODEL?.trim()),
   };
 }
 
@@ -64,5 +67,6 @@ export function getServerConfig(env: Readonly<Record<string, string | undefined>
     source: status.source,
     firecrawlKey: env.FIRECRAWL_API_KEY?.trim() || "",
     fetchEndpoint: parseFetchEndpoint(env.PRODUCT_FETCH_ENDPOINT),
+    visionModel: env.OPENAI_VISION_MODEL?.trim() || "",
   };
 }

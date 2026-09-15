@@ -7,7 +7,7 @@ import { createAnalyzeHandler, RequestGate } from "../lib/server/analyze-handler
 import { generateContent } from "../lib/server/generate";
 import { fetchProduct, type HtmlFetcher } from "../lib/server/source";
 import { parseFetchEndpoint } from "../lib/server/config";
-import { config, link, product, validContent, html as fixtureHtml } from "./fixtures";
+import { config, link, product, validContent, validQuality, html as fixtureHtml } from "./fixtures";
 
 const restrictedHtml = fixtureHtml.replace(
   '<div id="corePrice_feature_div"><span class="a-price"><span class="a-offscreen">$29.95</span></span></div>',
@@ -76,7 +76,7 @@ function request(url = link.url, token = "") {
   return new Request("http://localhost/api/analyze", { method: "POST", headers: { "Content-Type": "application/json", "x-app-access-token": token }, body: JSON.stringify({ url }) });
 }
 function handler(overrides: Parameters<typeof createAnalyzeHandler>[0] = {}) {
-  return createAnalyzeHandler({ config: () => config, product: async () => product, generate: async () => validContent, accessToken: () => "", gate: new RequestGate(), ...overrides });
+  return createAnalyzeHandler({ config: () => config, product: async () => product, generate: async () => ({ content: validContent, quality: validQuality }), accessToken: () => "", gate: new RequestGate(), ...overrides });
 }
 
 test("model adapter makes a real-format request and validates content without test data in production", async () => {
@@ -89,7 +89,7 @@ test("model adapter makes a real-format request and validates content without te
     assert.ok(body.messages[1].content.includes("F5"));
     return chatResponse(JSON.stringify(validContent));
   };
-  assert.deepEqual(await generateContent(product, config, new AbortController().signal, fetcher), validContent);
+  assert.deepEqual((await generateContent(product, config, new AbortController().signal, fetcher)).content, validContent);
 });
 test("DeepSeek official endpoint explicitly disables thinking", async () => {
   const fetcher: typeof fetch = async (_, init) => {
@@ -125,7 +125,7 @@ test("does not retry indefinitely on invalid content", async () => {
   let calls = 0;
   const fetcher: typeof fetch = async () => { calls++; return chatResponse("{}"); };
   await assert.rejects(() => generateContent(product, config, new AbortController().signal, fetcher), (error: unknown) => error instanceof AppError && error.code === "MODEL_VALIDATION_FAILED");
-  assert.equal(calls, 2);
+  assert.equal(calls, 3, "结构修正与质量修正共用固定的尝试上限，不能无限重试");
 });
 test("provider authorization failure is not retried or leaked", async () => {
   let calls = 0;
@@ -148,7 +148,7 @@ test("pipeline sends ordered actual stages, product and validated result", async
   const response = await handler()(request());
   await consumeAnalysisStream(response, (event) => events.push(event));
   assert.deepEqual(events.map((event) => event.type), ["stage", "product", "stage", "result"]);
-  assert.deepEqual(events.at(-1), { type: "result", content: validContent });
+  assert.deepEqual(events.at(-1), { type: "result", content: validContent, quality: validQuality });
 });
 test("missing configuration fails before scraping or model requests", async () => {
   let fetched = false;
@@ -183,7 +183,7 @@ test("cancelling the response aborts pending work and releases its slot", async 
 });
 test("source failure emits error and never invokes the model", async () => {
   let generated = false;
-  const response = await handler({ product: async () => { throw new AppError("SOURCE_BLOCKED", "访问受限"); }, generate: async () => { generated = true; return validContent; } })(request());
+  const response = await handler({ product: async () => { throw new AppError("SOURCE_BLOCKED", "访问受限"); }, generate: async () => { generated = true; return { content: validContent, quality: validQuality }; } })(request());
   const events: AnalysisEvent[] = [];
   await consumeAnalysisStream(response, (event) => events.push(event));
   assert.equal(generated, false);
@@ -204,7 +204,7 @@ test("access token protects the endpoint, without echoing it", async () => {
   await consumeAnalysisStream(accepted, () => undefined);
 });
 test("stream decoder handles Chinese characters split across byte boundaries", async () => {
-  const messages: AnalysisEvent[] = [{ type: "product", product }, { type: "result", content: validContent }];
+  const messages: AnalysisEvent[] = [{ type: "product", product }, { type: "result", content: validContent, quality: validQuality }];
   const bytes = new TextEncoder().encode(messages.map((message) => JSON.stringify(message)).join("\n"));
   const response = new Response(new ReadableStream({ start(controller) { for (let index = 0; index < bytes.length; index += 7) controller.enqueue(bytes.slice(index, index + 7)); controller.close(); } }), { headers: { "Content-Type": "application/x-ndjson" } });
   const events: AnalysisEvent[] = [];
@@ -216,7 +216,7 @@ test("an interrupted stream is not accepted as completed", async () => {
   await assert.rejects(() => consumeAnalysisStream(response, () => undefined), (error: unknown) => error instanceof AppError && error.code === "INCOMPLETE_STREAM");
 });
 test("result without product is not accepted", async () => {
-  const response = new Response(JSON.stringify({ type: "result", content: validContent }) + "\n", { headers: { "Content-Type": "application/x-ndjson" } });
+  const response = new Response(JSON.stringify({ type: "result", content: validContent, quality: validQuality }) + "\n", { headers: { "Content-Type": "application/x-ndjson" } });
   await assert.rejects(() => consumeAnalysisStream(response, () => undefined), AppError);
 });
 test("HTTP error is surfaced using only the public error object", async () => {
