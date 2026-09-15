@@ -126,6 +126,10 @@ export function parseProductHtml(html: string, link: AmazonLink, provider: "dire
   const jsonPrice = string(offers.price);
   const displayPrice = visiblePrice || (jsonPrice ? `${currency || ""} ${jsonPrice}`.trim() : "");
   const price = displayPrice && displayPrice.length < 100 && /\d/.test(displayPrice) ? { display: displayPrice, currency } : null;
+  // Amazon localises amazon.com prices to the visitor's region. A price collected from outside the
+  // United States can differ in currency and amount from what a US visitor sees on the same page,
+  // so it is labelled instead of being presented as the listing's only price.
+  const localisedPrice = Boolean(price) && link.marketplace === "amazon.com" && !/^(?:US)?\$\s?[\d,]/.test(price!.display);
   // A listing that cannot ship to the crawler's region renders no price at all, so the reason is
   // reported instead of leaving an unexplained gap.
   const availabilityText = clean($("#outOfStock, #buybox, #availability, #exports_desktop_qualifiedBuybox_bb_unavailable_feature_div").text()).slice(0, 600);
@@ -156,7 +160,7 @@ export function parseProductHtml(html: string, link: AmazonLink, provider: "dire
     ...(description ? [{ label: "页面商品说明", value: description.slice(0, 1600) }] : []),
   ];
   return {
-    ...link, title, brand: brand || null, category: category || null, price, priceUnavailableReason, variant, imageUrl, imageInsight: null,
+    ...link, title, brand: brand || null, category: category || null, price, priceUnavailableReason, priceLocalised: localisedPrice, variant, imageUrl, imageInsight: null,
     features, specifications, description: description.slice(0, 1600) || null,
     evidence: facts.map((fact, index) => ({ id: `F${index + 1}`, ...fact })),
     source: { provider, fetchedAt: new Date().toISOString() },
@@ -167,6 +171,7 @@ export function parseProductHtml(html: string, link: AmazonLink, provider: "dire
       ...(priceUnavailableReason === "not_found" ? ["页面未展示可确认的价格，未使用默认金额补齐。"] : []),
       ...(variant && !price ? [`该商品有 ${variant.total} 个型号或规格${variant.name ? `，本次分析的是「${variant.name}」` : ""}；不同型号价格可能不同，未借用其他型号的价格填充。`] : []),
       ...(variant && price ? [`该商品有 ${variant.total} 个型号或规格${variant.name ? `，以上价格与分析对应「${variant.name}」` : ""}，其他型号可能不同。`] : []),
+      ...(localisedPrice ? [`页面价格显示为「${price!.display}」，是 Amazon 按本次采集所在地区本地化后的报价；美国本地访问同一页面通常显示美元价格，金额也可能不同。`] : []),
       ...(!category ? ["页面品类未取得；分析中的适用人群与场景属于模型推断。"] : []),
       "商品功能与规格为页面标称，未进行独立性能验证。",
     ],

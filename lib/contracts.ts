@@ -17,6 +17,8 @@ export const productSchema = z.object({
   category: z.string().nullable(),
   price: z.object({ display: z.string(), currency: z.string().nullable() }).nullable(),
   priceUnavailableReason: z.enum(["region_restricted", "out_of_stock", "not_found"]).nullable(),
+  /** True when an amazon.com price was localised to the crawler's region instead of shown in USD. */
+  priceLocalised: z.boolean(),
   variant: z.object({ name: z.string().nullable(), total: z.number().int().min(2) }).nullable(),
   imageUrl: z.string().url().nullable(),
   /** Attributes read from the product photo by a vision model. Never mixed into page text facts. */

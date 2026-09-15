@@ -94,6 +94,21 @@ test("preserves locale price text without inventing a currency", () => {
   const result = parseProductHtml(html.replace("$29.95", "29,95 €"), { ...link, marketplace: "amazon.de" }, "direct");
   assert.equal(result.price?.display, "29,95 €");
 });
+test("marks an amazon.com price that was localised away from USD", () => {
+  assert.equal(parseProductHtml(html, link, "direct").priceLocalised, false, "美元价不应被标记");
+  for (const shown of ["US$29.95", "$1,299.00"]) {
+    assert.equal(parseProductHtml(html.replace("$29.95", shown), link, "direct").priceLocalised, false, shown);
+  }
+  for (const shown of ["S$76.20", "HKD469.83", "A$89.00"]) {
+    const result = parseProductHtml(html.replace("$29.95", shown), link, "direct");
+    assert.equal(result.priceLocalised, true, shown);
+    assert.ok(result.warnings.some((message) => message.includes("本地化") && message.includes(shown)), shown);
+  }
+  // Non-US marketplaces legitimately price in their own currency, so they are not flagged.
+  assert.equal(parseProductHtml(html.replace("$29.95", "29,95 €"), { ...link, marketplace: "amazon.de" }, "direct").priceLocalised, false);
+  // A missing price cannot be localised.
+  assert.equal(parseProductHtml(html.replace("$29.95", ""), link, "direct").priceLocalised, false);
+});
 test("supports Product JSON-LD when visible DOM fields are absent", () => {
   const data = { "@graph": [{ "@type": "Product", sku: link.asin, name: "测试商品的结构化描述", description: "可供测试的详细说明。".repeat(12), offers: { price: "19.90", priceCurrency: "EUR" }, brand: { name: "SampleBrand" } }] };
   const result = parseProductHtml(`<script type="application/ld+json">${JSON.stringify(data)}</script>`, link, "firecrawl");
