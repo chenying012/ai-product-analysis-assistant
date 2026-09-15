@@ -1,7 +1,7 @@
 import { characterCount, scriptText, type Content, type Product } from "../contracts";
 
 export type QualityIssue = {
-  code: "absolute_claim" | "guaranteed_effect" | "unsupported_number" | "price_claim" | "health_claim" | "unsupported_comparison" | "purchase_pressure" | "hook_too_slow";
+  code: "absolute_claim" | "guaranteed_effect" | "unsupported_number" | "price_claim" | "health_claim" | "unsupported_comparison" | "purchase_pressure" | "hook_too_slow" | "dropped_condition" | "weak_citation";
   severity: "blocking" | "advisory";
   field: string;
   excerpt: string;
@@ -86,6 +86,35 @@ function digitsIn(text: string): string[] {
   return (text.match(/\d+(?:[.,]\d+)?/g) || []).filter((value) => value.replace(/\D/g, "").length > 0);
 }
 
+// A page often states a capability together with a prerequisite: another device, a separate purchase or
+// a subscription. Repeating only the capability turns a conditional feature into an unconditional promise,
+// which is the most common factual error in this kind of copy.
+// Only unambiguous prerequisite wording is matched. Loose phrasing such as "need a bigger sound?" appears
+// in marketing questions and must not be treated as a condition.
+const CONDITION_IN_EVIDENCE = /\b(requires?|required|sold separately|not included|subscription required|requires? a subscription|with a compatible [a-z ]{3,30}|compatible \w+ (?:network|device|hub|router|speaker)|additional purchase|separate purchase)\b|需(?:要另|单独|另)购|另行购买|不含[^，。]{0,8}|需订阅|需配合[^，。]{0,10}使用/i;
+const CONDITION_IN_CLAIM = /需要|需先|需配合|需另|另购|单独购买|不含|订阅|前提|搭配|兼容的|兼容设备|已有|若已|如果已/;
+
+/** Identity fields are routinely cited for naming the product, so they are not judged for conditions or overlap. */
+const IDENTITY_LABELS = new Set(["商品名称", "品牌", "品类", "当前型号", "可选型号数量", "页面价格"]);
+
+/** Extracts comparable terms: CJK bigrams plus latin/number words, used for loose overlap checks. */
+function terms(text: string): Set<string> {
+  const lower = text.toLowerCase();
+  const found = new Set<string>();
+  for (const word of lower.match(/[a-z][a-z0-9+.-]{2,}|\d+(?:[.,]\d+)?/g) || []) found.add(word);
+  const han = Array.from(lower.match(/\p{Script=Han}+/gu)?.join("") ?? "");
+  for (let index = 0; index + 1 < han.length; index++) found.add(han[index] + han[index + 1]);
+  return found;
+}
+
+const STOP_TERMS = new Set(["the", "and", "for", "with", "you", "your", "this", "that", "amazon", "inch", "more", "can", "will", "all", "new", "one", "use", "used", "using", "from", "into", "out", "not", "our", "its"]);
+
+function overlapCount(claim: Set<string>, evidence: Set<string>): number {
+  let count = 0;
+  for (const term of claim) if (!STOP_TERMS.has(term) && evidence.has(term)) count++;
+  return count;
+}
+
 /**
  * Reviews generated text against the collected product material.
  * The checker only judges wording that the material cannot support; it never rewrites the model output.
@@ -95,6 +124,7 @@ export function reviewContent(content: Content, product: Product): QualityReport
   const material = [product.title, ...product.evidence.map((fact) => `${fact.label} ${fact.value}`)].join("\n");
   const materialLower = material.toLowerCase();
   const materialDigits = new Set(digitsIn(material));
+  const byId = new Map(product.evidence.map((fact) => [fact.id, fact]));
 
   const scan = (field: string, text: string) => {
     for (const rule of RULES) {
@@ -120,14 +150,42 @@ export function reviewContent(content: Content, product: Product): QualityReport
     }
   };
 
+  /** Checks a claim against the evidence it cites: dropped prerequisites and wholly unrelated citations. */
+  const reportedConditions = new Set<string>();
+  const checkCitations = (field: string, text: string, evidenceIds: string[]) => {
+    const claimTerms = terms(text);
+    const cited = evidenceIds.map((id) => byId.get(id)).filter((fact): fact is NonNullable<typeof fact> => Boolean(fact));
+    const judged = cited.filter((fact) => !IDENTITY_LABELS.has(fact.label));
+    for (const fact of judged) {
+      const condition = fact.value.match(CONDITION_IN_EVIDENCE)?.[0]?.trim();
+      if (condition && !CONDITION_IN_CLAIM.test(text) && !reportedConditions.has(`${fact.id}|${condition}`)) {
+        reportedConditions.add(`${fact.id}|${condition}`);
+        issues.push({
+          code: "dropped_condition", severity: "blocking", field, excerpt: condition,
+          message: `依据 ${fact.id} 里这项能力带有前提条件，文案没有体现，会让人以为无条件可用。请补上条件或改写这句。`,
+        });
+      }
+    }
+    // Chinese copy legitimately paraphrases English page text, so a single non-overlapping citation proves
+    // nothing. Only a claim whose every citation shares no term at all is worth questioning.
+    if (judged.length > 0 && judged.every((fact) => overlapCount(claimTerms, terms(`${fact.label} ${fact.value}`)) === 0)) {
+      issues.push({
+        code: "weak_citation", severity: "advisory", field, excerpt: judged.map((fact) => fact.id).join(" "),
+        message: "这句话与它引用的全部依据都没有可对应的共同内容，请确认引用编号是否正确。",
+      });
+    }
+  };
+
   for (const group of FIELD_GROUPS) {
     content[group.key].forEach((point, index) => {
       scan(`${group.label} ${index + 1} · 标题`, point.title);
       scan(`${group.label} ${index + 1} · 说明`, point.description);
+      checkCitations(`${group.label} ${index + 1}`, `${point.title} ${point.description}`, point.evidenceIds);
     });
   }
   scan("口播 · 钩子", content.script.hook);
   scan("口播 · 正文", content.script.body);
+  checkCitations("口播", scriptText(content.script), content.script.evidenceIds);
 
   const hookSeconds = estimateSpeechSeconds(content.script.hook);
   const totalSeconds = estimateSpeechSeconds(scriptText(content.script));

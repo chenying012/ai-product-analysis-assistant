@@ -48,7 +48,7 @@ export const contentSchema = z.object({
 }).strict();
 
 export const qualityIssueSchema = z.object({
-  code: z.enum(["absolute_claim", "guaranteed_effect", "unsupported_number", "price_claim", "health_claim", "unsupported_comparison", "purchase_pressure", "hook_too_slow"]),
+  code: z.enum(["absolute_claim", "guaranteed_effect", "unsupported_number", "price_claim", "health_claim", "unsupported_comparison", "purchase_pressure", "hook_too_slow", "dropped_condition", "weak_citation"]),
   severity: z.enum(["blocking", "advisory"]),
   field: z.string(),
   excerpt: z.string(),

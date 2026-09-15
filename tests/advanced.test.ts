@@ -153,8 +153,78 @@ test("generated text may cite image evidence", () => {
   assert.ok(report.evidence.cited > 0);
 });
 
-const exaggerated: Content = { ...validContent, sellingPoints: [{ title: "收纳", description: "绝对不会变形，彻底解决杂物问题。", evidenceIds: ["F5"] }] };
-const chatResponse = (content: Content) => Response.json({ choices: [{ message: { content: JSON.stringify(content) }, finish_reason: "stop" }] });
+const conditioned: Product = {
+  ...product,
+  evidence: [...product.evidence, { id: "FC", label: "页面功能描述", value: "Extend Wi-Fi coverage with a compatible eero network; router sold separately." }],
+};
+
+test("a prerequisite stated in the cited evidence must appear in the copy", () => {
+  const dropped: Content = { ...validContent, sellingPoints: [{ title: "扩展网络", description: "它还能扩展家里的 Wi-Fi 覆盖范围，信号更稳。", evidenceIds: ["FC"] }] };
+  const report = reviewContent(dropped, conditioned);
+  assert.equal(report.passed, false, "遗漏前提条件应被拦截");
+  const issue = report.issues.find((item) => item.code === "dropped_condition");
+  assert.ok(issue, "应识别为前提条件遗漏");
+  assert.equal(issue!.severity, "blocking");
+  assert.ok(issue!.message.includes("FC"));
+});
+
+test("copy that keeps the prerequisite passes", () => {
+  const kept: Content = { ...validContent, sellingPoints: [{ title: "扩展网络", description: "如果已有兼容的 eero 网络，它还能帮助扩展 Wi-Fi 覆盖，路由需单独购买。", evidenceIds: ["FC"] }] };
+  const report = reviewContent(kept, conditioned);
+  assert.equal(report.issues.some((issue) => issue.code === "dropped_condition"), false);
+});
+
+test("evidence without a prerequisite is not flagged", () => {
+  const report = reviewContent(validContent, product);
+  assert.equal(report.issues.some((issue) => issue.code === "dropped_condition"), false);
+});
+
+test("marketing questions and identity fields do not raise false conditions", () => {
+  // "Need a bigger sound?" is a marketing question, and the product name is routinely cited for naming.
+  const noisy: Product = {
+    ...product,
+    evidence: [
+      { id: "F1", label: "商品名称", value: "Echo Dot - Need a bigger sound? Requires nothing extra" },
+      ...product.evidence.slice(1),
+    ],
+  };
+  const citesTitle: Content = { ...validContent, audiences: [{ title: "小空间用户", description: "适合卧室或书桌使用的小型设备。", evidenceIds: ["F1"] }] };
+  const report = reviewContent(citesTitle, noisy);
+  assert.equal(report.issues.some((issue) => issue.code === "dropped_condition"), false, "标题里的营销问句不应算前提条件");
+  assert.equal(report.issues.some((issue) => issue.code === "weak_citation"), false, "引用商品名称属正常命名");
+});
+
+test("the same prerequisite is reported once instead of per field", () => {
+  const dropped: Content = {
+    ...validContent,
+    scenarios: [{ title: "扩展覆盖", description: "在客厅也能把网络信号带过去。", evidenceIds: ["FC"] }],
+    sellingPoints: [{ title: "扩展网络", description: "它还能扩展家里的 Wi-Fi 覆盖范围。", evidenceIds: ["FC"] }],
+  };
+  const conditions = reviewContent(dropped, conditioned).issues.filter((issue) => issue.code === "dropped_condition");
+  assert.equal(conditions.length, 1, "同一依据的同一条件只报一次");
+});
+
+test("a citation unrelated to the claim is reported as advisory", () => {
+  const spec = product.evidence.find((fact) => fact.label === "Material");
+  assert.ok(spec, "固定数据应包含规格依据");
+  const unrelated: Content = { ...validContent, sellingPoints: [{ title: "静音", description: "运转时几乎听不到噪音。", evidenceIds: [spec!.id] }] };
+  const report = reviewContent(unrelated, product);
+  const issue = report.issues.find((item) => item.code === "weak_citation");
+  assert.ok(issue, "全部引用都无关时应提示");
+  assert.equal(issue!.severity, "advisory", "弱引用只提示，不拦截");
+  // A claim that genuinely restates its evidence must not be flagged.
+  assert.equal(reviewContent(validContent, product).issues.some((item) => item.code === "weak_citation"), false);
+});
+
+test("one relevant citation is enough to avoid a weak-citation flag", () => {
+  // Chinese copy paraphrases English page text, so per-citation term overlap would misfire constantly.
+  const spec = product.evidence.find((fact) => fact.label === "Material")!;
+  const feature = product.evidence.find((fact) => fact.label === "页面功能描述" && fact.value.includes("折叠"))!;
+  const mixed: Content = { ...validContent, sellingPoints: [{ title: "可折叠", description: "可折叠结构便于闲置时收纳。", evidenceIds: [spec.id, feature.id] }] };
+  assert.equal(reviewContent(mixed, product).issues.some((item) => item.code === "weak_citation"), false);
+});
+
+const exaggerated: Content = { ...validContent, sellingPoints: [{ title: "收纳", description: "绝对不会变形，彻底解决杂物问题。", evidenceIds: ["F5"] }] };const chatResponse = (content: Content) => Response.json({ choices: [{ message: { content: JSON.stringify(content) }, finish_reason: "stop" }] });
 
 test("a blocking quality issue triggers one correction and the fixed draft is returned", async () => {
   const prompts: string[] = [];
