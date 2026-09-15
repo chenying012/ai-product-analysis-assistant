@@ -15,6 +15,43 @@ function productNodes(value: unknown, depth = 0): Record<string, unknown>[] {
   return types.includes("Product") ? [node] : productNodes(node["@graph"], depth + 1);
 }
 
+/** Reads an embedded JSON object by key without executing page scripts. Returns null when the value is absent or malformed. */
+export function readEmbeddedObject(html: string, key: string, limit = 200000): Record<string, unknown> | null {
+  const at = html.indexOf(`"${key}"`);
+  if (at < 0) return null;
+  const start = html.indexOf("{", at);
+  if (start < 0) return null;
+  let depth = 0;
+  let inString = false;
+  let escaped = false;
+  for (let index = start; index < html.length && index - start < limit; index++) {
+    const char = html[index];
+    if (escaped) { escaped = false; continue; }
+    if (char === "\\") { escaped = true; continue; }
+    if (char === '"') { inString = !inString; continue; }
+    if (inString) continue;
+    if (char === "{") depth++;
+    else if (char === "}" && --depth === 0) {
+      try {
+        const parsed = JSON.parse(html.slice(start, index + 1)) as unknown;
+        return parsed && typeof parsed === "object" && !Array.isArray(parsed) ? parsed as Record<string, unknown> : null;
+      } catch { return null; }
+    }
+  }
+  return null;
+}
+
+/** Identifies the selected model of a multi-variant listing. Sibling variants are counted but never used as a price source. */
+export function parseVariant(html: string, asin: string): Product["variant"] {
+  const data = readEmbeddedObject(html, "dimensionValuesDisplayData");
+  if (!data) return null;
+  const siblings = Object.keys(data).filter((key) => /^[A-Z0-9]{10}$/i.test(key));
+  if (siblings.length < 2) return null;
+  const current = data[asin] ?? data[asin.toUpperCase()];
+  const name = clean(Array.isArray(current) ? current.map((item) => string(item)).filter(Boolean).join(" / ") : string(current));
+  return { name: name && name.length <= 200 ? name : null, total: siblings.length };
+}
+
 export function safeImageUrl(value: unknown): string | null {
   try {
     const image = new URL(string(value));
@@ -69,11 +106,18 @@ export function parseProductHtml(html: string, link: AmazonLink, provider: "dire
   const brand = clean($("#bylineInfo").text()).replace(/^Visit the (.+) Store$/i, "$1").replace(/^Brand:\s*/i, "") || string(record(json.brand).name) || string(json.brand);
   const category = $("#wayfinding-breadcrumbs_feature_div a").toArray().map((el) => clean($(el).text())).filter(Boolean).slice(-3).join(" / ") || string(json.category);
   const offers = Array.isArray(json.offers) ? record(json.offers[0]) : record(json.offers);
+  // Every selector stays inside this listing's own buy box. Recommendation carousels are excluded
+  // because a restricted page still renders prices that belong to other products.
   const priceSelectors = [
     "#corePriceDisplay_desktop_feature_div .priceToPay .a-offscreen",
     "#corePrice_feature_div .a-price:not(.a-text-price) .a-offscreen",
     "#apex_desktop .a-price:not(.a-text-price) .a-offscreen",
     "#corePriceDisplay_desktop_feature_div .a-price:not(.a-text-price) .a-offscreen",
+    "#corePriceDisplay_mobile_feature_div .priceToPay .a-offscreen",
+    "#corePriceDisplay_mobile_feature_div .a-price:not(.a-text-price) .a-offscreen",
+    "#apex_mobile .a-price:not(.a-text-price) .a-offscreen",
+    "#tp_price_block_total_price_ww .a-offscreen",
+    "#newAccordionRow .a-price:not(.a-text-price) .a-offscreen",
     "#priceblock_ourprice", "#priceblock_dealprice", "#price_inside_buybox",
   ];
   const currencyText = string(offers.priceCurrency) || clean($("meta[itemprop='priceCurrency']").attr("content"));
@@ -82,6 +126,14 @@ export function parseProductHtml(html: string, link: AmazonLink, provider: "dire
   const jsonPrice = string(offers.price);
   const displayPrice = visiblePrice || (jsonPrice ? `${currency || ""} ${jsonPrice}`.trim() : "");
   const price = displayPrice && displayPrice.length < 100 && /\d/.test(displayPrice) ? { display: displayPrice, currency } : null;
+  // A listing that cannot ship to the crawler's region renders no price at all, so the reason is
+  // reported instead of leaving an unexplained gap.
+  const availabilityText = clean($("#outOfStock, #buybox, #availability, #exports_desktop_qualifiedBuybox_bb_unavailable_feature_div").text()).slice(0, 600);
+  const priceUnavailableReason = price ? null
+    : /cannot be shipped to your selected delivery location|choose a different delivery location/i.test(availabilityText) ? "region_restricted" as const
+    : /currently unavailable|out of stock|temporarily out of stock/i.test(availabilityText) ? "out_of_stock" as const
+    : "not_found" as const;
+  const variant = parseVariant(html, link.asin);
   const imageEl = $("#landingImage, #imgBlkFront").first();
   let imageUrl = safeImageUrl(imageEl.attr("data-old-hires")) || safeImageUrl(imageEl.attr("src"));
   if (!imageUrl) {
@@ -96,18 +148,25 @@ export function parseProductHtml(html: string, link: AmazonLink, provider: "dire
     { label: "商品名称", value: title },
     ...(brand ? [{ label: "品牌", value: brand }] : []),
     ...(category ? [{ label: "品类", value: category }] : []),
+    ...(variant?.name ? [{ label: "当前型号", value: variant.name }] : []),
+    ...(variant ? [{ label: "可选型号数量", value: `${variant.total} 个` }] : []),
     ...(price ? [{ label: "页面价格", value: price.display }] : []),
     ...features.map((value) => ({ label: "页面功能描述", value })),
     ...specifications.map((item) => ({ label: item.name, value: item.value })),
     ...(description ? [{ label: "页面商品说明", value: description.slice(0, 1600) }] : []),
   ];
   return {
-    ...link, title, brand: brand || null, category: category || null, price, imageUrl,
+    ...link, title, brand: brand || null, category: category || null, price, priceUnavailableReason, variant, imageUrl,
     features, specifications, description: description.slice(0, 1600) || null,
     evidence: facts.map((fact, index) => ({ id: `F${index + 1}`, ...fact })),
     source: { provider, fetchedAt: new Date().toISOString() },
     warnings: [
-      ...(!price ? ["页面未展示可确认的价格，未使用默认金额补齐。"] : []),
+      ...(priceUnavailableReason === "region_restricted"
+        ? ["Amazon 判定该商品无法配送到本次采集所在地区，因此页面未展示价格。页面上其他金额属于推荐位的其他商品，未采用。可改用 Firecrawl 等能从其他地区采集的来源获取价格。"] : []),
+      ...(priceUnavailableReason === "out_of_stock" ? ["页面显示该商品当前缺货，未展示可确认的价格。"] : []),
+      ...(priceUnavailableReason === "not_found" ? ["页面未展示可确认的价格，未使用默认金额补齐。"] : []),
+      ...(variant && !price ? [`该商品有 ${variant.total} 个型号或规格${variant.name ? `，本次分析的是「${variant.name}」` : ""}；不同型号价格可能不同，未借用其他型号的价格填充。`] : []),
+      ...(variant && price ? [`该商品有 ${variant.total} 个型号或规格${variant.name ? `，以上价格与分析对应「${variant.name}」` : ""}，其他型号可能不同。`] : []),
       ...(!category ? ["页面品类未取得；分析中的适用人群与场景属于模型推断。"] : []),
       "商品功能与规格为页面标称，未进行独立性能验证。",
     ],

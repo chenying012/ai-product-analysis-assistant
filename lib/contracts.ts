@@ -16,6 +16,8 @@ export const productSchema = z.object({
   brand: z.string().nullable(),
   category: z.string().nullable(),
   price: z.object({ display: z.string(), currency: z.string().nullable() }).nullable(),
+  priceUnavailableReason: z.enum(["region_restricted", "out_of_stock", "not_found"]).nullable(),
+  variant: z.object({ name: z.string().nullable(), total: z.number().int().min(2) }).nullable(),
   imageUrl: z.string().url().nullable(),
   features: z.array(z.string()),
   specifications: z.array(z.object({ name: z.string(), value: z.string() })),

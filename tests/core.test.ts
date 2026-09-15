@@ -43,8 +43,52 @@ test("extracts product details and preserves decimal price", () => {
 test("retains missing price as unknown rather than zero", () => {
   const result = parseProductHtml(html.replace("$29.95", ""), link, "direct");
   assert.equal(result.price, null);
+  assert.equal(result.priceUnavailableReason, "not_found");
   assert.ok(result.warnings.some((message) => message.includes("价格")));
   assert.ok(!("stars" in result));
+});
+test("explains a missing price caused by delivery restrictions", () => {
+  const restricted = html.replace(
+    '<div id="corePrice_feature_div"><span class="a-price"><span class="a-offscreen">$29.95</span></span></div>',
+    '<div id="outOfStock">This item cannot be shipped to your selected delivery location.</div>'
+    + '<div id="similar-items"><span class="a-price"><span class="a-offscreen">$88.00</span></span></div>',
+  );
+  const result = parseProductHtml(restricted, link, "direct");
+  assert.equal(result.price, null, "推荐位价格不得被当作本商品价格");
+  assert.equal(result.priceUnavailableReason, "region_restricted");
+  assert.ok(result.warnings.some((message) => message.includes("无法配送")));
+  assert.ok(!result.evidence.some((fact) => fact.value.includes("88.00")));
+});
+test("reports an out-of-stock listing separately from an unparsed price", () => {
+  const soldOut = html.replace(
+    '<div id="corePrice_feature_div"><span class="a-price"><span class="a-offscreen">$29.95</span></span></div>',
+    '<div id="outOfStock">Currently unavailable.</div>',
+  );
+  assert.equal(parseProductHtml(soldOut, link, "direct").priceUnavailableReason, "out_of_stock");
+});
+test("identifies the selected model of a multi-variant listing", () => {
+  const variants = { [link.asin]: ["2pack Olive Green"], B0CXT78M9H: ["1pack Blue"], B0CXT9C72K: ["1pack Red"] };
+  const result = parseProductHtml(
+    html.replace("</body>", `<script>var data = {"dimensionValuesDisplayData":${JSON.stringify(variants)},"other":1};</script></body>`),
+    link, "direct",
+  );
+  assert.deepEqual(result.variant, { name: "2pack Olive Green", total: 3 });
+  assert.ok(result.evidence.some((fact) => fact.label === "当前型号" && fact.value === "2pack Olive Green"));
+  assert.ok(result.evidence.some((fact) => fact.label === "可选型号数量" && fact.value === "3 个"));
+  assert.ok(result.warnings.some((message) => message.includes("3 个型号")));
+});
+test("keeps variant null when the listing has no sibling models", () => {
+  assert.equal(product.variant, null);
+  const single = parseProductHtml(
+    html.replace("</body>", `<script>var d = {"dimensionValuesDisplayData":{"${link.asin}":["Only"]}};</script></body>`),
+    link, "direct",
+  );
+  assert.equal(single.variant, null);
+});
+test("ignores malformed variant metadata instead of failing the parse", () => {
+  const result = parseProductHtml(html.replace("</body>", '<script>var d = {"dimensionValuesDisplayData":{oops};</script></body>'), link, "direct");
+  assert.equal(result.variant, null);
+  assert.equal(result.price?.display, "$29.95");
 });
 test("preserves locale price text without inventing a currency", () => {
   const result = parseProductHtml(html.replace("$29.95", "29,95 €"), { ...link, marketplace: "amazon.de" }, "direct");
