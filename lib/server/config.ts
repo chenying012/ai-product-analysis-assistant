@@ -1,5 +1,6 @@
 import { AppError } from "../errors";
 import type { SetupStatus } from "../contracts";
+import { ANALYSIS_COST, SIGNUP_BONUS } from "./credits";
 
 export type ServerConfig = {
   apiKey: string;
@@ -15,6 +16,9 @@ export type ServerConfig = {
 
 export function getSetupStatus(env: Readonly<Record<string, string | undefined>> = process.env): SetupStatus {
   const source = env.PRODUCT_SOURCE === "firecrawl" ? "firecrawl" : "direct";
+  // Read directly from the environment rather than through the store module, so this stays free of
+  // the SQLite dependency that every importer of this file would otherwise pull in.
+  const accounts = env.ACCOUNTS_DB?.trim();
   return {
     modelConfigured: Boolean(env.OPENAI_API_KEY?.trim() && env.OPENAI_MODEL?.trim()),
     sourceConfigured: source === "direct" || Boolean(env.FIRECRAWL_API_KEY?.trim()),
@@ -22,6 +26,9 @@ export function getSetupStatus(env: Readonly<Record<string, string | undefined>>
     accessProtected: Boolean(env.APP_ACCESS_TOKEN?.trim()),
     regionFallbackConfigured: Boolean(env.PRODUCT_FETCH_ENDPOINT?.trim()) || Boolean(env.FIRECRAWL_API_KEY?.trim()),
     imageAnalysisConfigured: Boolean(env.OPENAI_VISION_MODEL?.trim()),
+    accountsEnabled: Boolean(accounts) && accounts !== "off",
+    signupBonus: SIGNUP_BONUS,
+    analysisCost: ANALYSIS_COST,
   };
 }
 

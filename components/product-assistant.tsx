@@ -1,11 +1,13 @@
 "use client";
 
-import { useEffect, useRef, useState, type FormEvent } from "react";
+import { useCallback, useEffect, useRef, useState, type FormEvent } from "react";
 import { ArrowRight, ArrowUpRight, AudioLines, Box, Check, ChevronRight, CircleHelp, Copy, FileText, Layers3, Link2, LoaderCircle, Package, Settings2, ShieldCheck, Sparkles, Target, Users, X, AlertCircle, RefreshCw, Lightbulb, BadgeCheck, ShieldAlert, Timer, Image as ImageIcon } from "lucide-react";
 import { characterCount, scriptText, type AnalysisPoint, type Content, type Product, type PublicError, type Quality, type SetupStatus } from "@/lib/contracts";
+import type { PublicUser } from "@/lib/account-contracts";
 import { normalizeAmazonUrl } from "@/lib/amazon-url";
 import { consumeAnalysisStream } from "@/lib/event-stream";
 import { publicError } from "@/lib/errors";
+import AccountPanel from "./account-panel";
 
 type Stage = "idle" | "fetching" | "inspecting" | "analyzing" | "reviewing" | "done";
 const stageCopy: Record<string, { title: string; detail: string }> = {
@@ -31,9 +33,16 @@ export default function ProductAssistant({ initialSetup }: { initialSetup: Setup
   const [error, setError] = useState<PublicError | null>(null);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [configFeedback, setConfigFeedback] = useState("");
+  const [account, setAccount] = useState<PublicUser | null>(null);
+  const [accountVersion, setAccountVersion] = useState(0);
   const abortRef = useRef<AbortController | null>(null);
   const dialogRef = useRef<HTMLDialogElement>(null);
   const ready = setup.modelConfigured && setup.sourceConfigured;
+  // With accounts on, a signed-out visitor cannot analyse anything, so the form is disabled up front
+  // instead of failing with a 401 after they type a link.
+  const needsSignIn = setup.accountsEnabled && !account;
+  const outOfCredits = Boolean(setup.accountsEnabled && account && account.credits < setup.analysisCost);
+  const onAccountChange = useCallback((next: PublicUser | null) => setAccount(next), []);
 
   useEffect(() => () => abortRef.current?.abort(), []);
   useEffect(() => {
@@ -49,6 +58,14 @@ export default function ProductAssistant({ initialSetup }: { initialSetup: Setup
     setContent(null);
     setQuality(null);
     try { normalizeAmazonUrl(url); } catch (issue) { setError(publicError(issue)); return; }
+    if (needsSignIn) {
+      setError({ code: "UNAUTHENTICATED", message: "请先在上方注册或登录，注册即赠积分。", retryable: false });
+      return;
+    }
+    if (outOfCredits) {
+      setError({ code: "INSUFFICIENT_CREDITS", message: `积分不足，当前余额 ${account?.credits ?? 0}。每次分析消耗 ${setup.analysisCost} 积分。`, retryable: false });
+      return;
+    }
     if (!ready) {
       setError({ code: "MODEL_NOT_CONFIGURED", message: "先完成服务端接口配置，就可以开始真实分析。我们不会用预设结果替代模型输出。", retryable: false });
       setSettingsOpen(true);
@@ -77,7 +94,12 @@ export default function ProductAssistant({ initialSetup }: { initialSetup: Setup
       setError(controller.signal.aborted
         ? { code: "CANCELLED", message: "已取消分析。可以修改链接后重新开始，已获取的商品信息保留在下方。", retryable: true }
         : publicError(issue));
-    } finally { setBusy(false); abortRef.current = null; }
+    } finally {
+      setBusy(false);
+      abortRef.current = null;
+      // The balance changed on the server, so ask the account panel to re-read it.
+      if (setup.accountsEnabled) setAccountVersion((version) => version + 1);
+    }
   }
 
   async function refreshConfig() {
@@ -112,8 +134,9 @@ export default function ProductAssistant({ initialSetup }: { initialSetup: Setup
 
       <section className="input-panel" aria-labelledby="input-heading">
         <div className="panel-topline"><h2 id="input-heading"><span className="step-number">01</span> 从商品链接开始</h2><span className="amazon-badge">amazon<span className="amazon-smile" /></span></div>
+        {setup.accountsEnabled && <AccountPanel signupBonus={setup.signupBonus} analysisCost={setup.analysisCost} refreshSignal={accountVersion} onUserChange={onAccountChange} />}
         <form onSubmit={submit}>
-          <div className="url-row"><label className="url-field"><Link2 size={19} /><span className="sr-only">Amazon 商品链接</span><input type="url" required maxLength={2048} value={url} onChange={(event) => setUrl(event.target.value)} disabled={busy} placeholder="粘贴 Amazon 商品详情页链接，发现产品的更多可能" autoComplete="off" spellCheck={false} /></label><button className="primary-button" type="submit" disabled={busy || !url.trim()}>{busy ? <><LoaderCircle size={17} className="spin" /> 分析中</> : <>开始分析 <ArrowRight size={18} /></>}</button></div>
+          <div className="url-row"><label className="url-field"><Link2 size={19} /><span className="sr-only">Amazon 商品链接</span><input type="url" required maxLength={2048} value={url} onChange={(event) => setUrl(event.target.value)} disabled={busy} placeholder="粘贴 Amazon 商品详情页链接，发现产品的更多可能" autoComplete="off" spellCheck={false} /></label><button className="primary-button" type="submit" disabled={busy || !url.trim() || needsSignIn || outOfCredits}>{busy ? <><LoaderCircle size={17} className="spin" /> 分析中</> : <>开始分析 <ArrowRight size={18} /></>}</button></div>
           {setup.accessProtected && <label className="access-field">网站访问口令<input type="password" value={token} onChange={(event) => setToken(event.target.value)} disabled={busy} autoComplete="off" placeholder="向网站维护者获取，仅本次页面使用" required /></label>}
           <div className="input-meta"><div className="examples"><span>没有链接？试试</span>{examples.map((example) => <button key={example.label} type="button" disabled={busy} onClick={() => { setUrl(example.url); setError(null); }}>{example.label}<ArrowUpRight size={11} /></button>)}</div><span className="source-caption"><ShieldCheck size={13} />公开商品页面 · 缺失信息明确标注</span></div>
         </form>

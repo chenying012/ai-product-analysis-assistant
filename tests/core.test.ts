@@ -157,12 +157,21 @@ test("rejects unsupported evidence, long hook, English output and wrong schema",
 });
 test("setup state exposes booleans, never model or scraping secrets", () => {
   const state = getSetupStatus({ OPENAI_API_KEY: "secret-a", OPENAI_MODEL: "model", FIRECRAWL_API_KEY: "secret-b", APP_ACCESS_TOKEN: "private-token" });
-  assert.deepEqual(state, { modelConfigured: true, sourceConfigured: true, source: "direct", accessProtected: true, regionFallbackConfigured: true, imageAnalysisConfigured: false });
+  assert.deepEqual(state, { modelConfigured: true, sourceConfigured: true, source: "direct", accessProtected: true, regionFallbackConfigured: true, imageAnalysisConfigured: false, accountsEnabled: false, signupBonus: 10, analysisCost: 1 });
   assert.ok(!JSON.stringify(state).includes("secret"));
   assert.equal(getSetupStatus({ OPENAI_VISION_MODEL: "vision-model" }).imageAnalysisConfigured, true);
   const bare = getSetupStatus({ OPENAI_API_KEY: "k", OPENAI_MODEL: "m" });
   assert.equal(bare.regionFallbackConfigured, false);
   assert.equal(getSetupStatus({ PRODUCT_FETCH_ENDPOINT: "https://relay.example/?url={url}" }).regionFallbackConfigured, true);
+});
+test("account mode is reported without leaking the database location", () => {
+  assert.equal(getSetupStatus({}).accountsEnabled, false);
+  assert.equal(getSetupStatus({ ACCOUNTS_DB: "off" }).accountsEnabled, false);
+  assert.equal(getSetupStatus({ ACCOUNTS_DB: "   " }).accountsEnabled, false);
+  assert.equal(getSetupStatus({ ACCOUNTS_DB: "on" }).accountsEnabled, true);
+  const custom = getSetupStatus({ ACCOUNTS_DB: "/srv/private/accounts.db" });
+  assert.equal(custom.accountsEnabled, true);
+  assert.ok(!JSON.stringify(custom).includes("/srv/private"), "不得对外暴露数据库路径");
 });
 test("requires explicit model configuration and validates provider settings", () => {
   assert.throws(() => getServerConfig({}), codeIs("MODEL_NOT_CONFIGURED"));
@@ -180,10 +189,17 @@ test("response reader limits bytes and correctly decodes split Chinese text", as
 });
 test("request gate caps concurrent and per-minute requests, releases once", () => {
   const gate = new RequestGate();
-  const a = gate.acquire(1000); const b = gate.acquire(1000);
-  assert.throws(() => gate.acquire(1000), codeIs("RATE_LIMITED"));
+  const a = gate.acquire("user-1", 1000); const b = gate.acquire("user-1", 1000);
+  assert.throws(() => gate.acquire("user-1", 1000), codeIs("RATE_LIMITED"));
   a(); a(); b();
-  for (let i = 0; i < 8; i++) gate.acquire(1000)();
-  assert.throws(() => gate.acquire(1000), codeIs("RATE_LIMITED"));
-  assert.doesNotThrow(() => gate.acquire(62000)());
+  for (let i = 0; i < 8; i++) gate.acquire("user-1", 1000)();
+  assert.throws(() => gate.acquire("user-1", 1000), codeIs("RATE_LIMITED"));
+  assert.doesNotThrow(() => gate.acquire("user-1", 62000)());
+});
+test("request gate counts each account separately", () => {
+  // A busy account must not consume the allowance of everyone else.
+  const gate = new RequestGate();
+  for (let i = 0; i < 10; i++) gate.acquire("busy", 1000)();
+  assert.throws(() => gate.acquire("busy", 1000), codeIs("RATE_LIMITED"));
+  assert.doesNotThrow(() => gate.acquire("quiet", 1000)());
 });

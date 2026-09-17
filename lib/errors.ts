@@ -1,5 +1,9 @@
 import type { PublicError } from "./contracts";
 
+/**
+ * Errors whose text is safe to show verbatim. Everything else is replaced with a generic message so
+ * an unexpected failure cannot leak internal details.
+ */
 export class AppError extends Error {
   constructor(
     public readonly code: string,

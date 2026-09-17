@@ -8,7 +8,7 @@
     "build": "next build --webpack",
     "start": "next start --hostname 0.0.0.0",
     "typecheck": "tsc --noEmit",
-    "test": "tsx --test tests/*.test.ts"
+    "test": "node --experimental-sqlite --disable-warning=ExperimentalWarning --import tsx --test tests/*.test.ts"
   },
   "dependencies": {
     "cheerio": "1.2.0",

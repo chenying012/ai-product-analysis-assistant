@@ -98,6 +98,12 @@ export type SetupStatus = {
   regionFallbackConfigured: boolean;
   /** True when a vision model is configured to read the product photo. */
   imageAnalysisConfigured: boolean;
+  /** True when registration, credits and history are active. False means original single-user mode. */
+  accountsEnabled: boolean;
+  /** Credits granted on registration, shown on the sign-up form. */
+  signupBonus: number;
+  /** Credits consumed by one analysis. */
+  analysisCost: number;
 };
 
 export function scriptText(script: Content["script"]): string {

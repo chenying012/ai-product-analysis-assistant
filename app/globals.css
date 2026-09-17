@@ -345,3 +345,40 @@ code { font-family: "SFMono-Regular", Consolas, monospace; font-size: .92em; ove
   html { scroll-behavior: auto; }
   *, *::before, *::after { animation-duration: .01ms !important; transition-duration: .01ms !important; }
 }
+
+/* Account bar: registration, balance and personal history. Sits above the link form because signing
+   in is a prerequisite for analysing anything once accounts are enabled. */
+.account-bar { margin-bottom: 18px; padding: 14px 16px; background: var(--green-light); border: 1px solid #d7e5dc; border-radius: 13px; display: grid; gap: 10px; }
+.account-bar[aria-busy="true"] { display: flex; align-items: center; gap: 8px; color: var(--muted); font-size: 13px; }
+.account-form { display: flex; flex-wrap: wrap; gap: 9px; align-items: center; }
+.account-tabs { display: inline-flex; padding: 3px; background: white; border: 1px solid #d7e5dc; border-radius: 9px; }
+.account-tabs button { padding: 5px 13px; border: 0; background: transparent; border-radius: 7px; color: var(--muted); font-size: 13px; cursor: pointer; }
+.account-tabs button.on { background: var(--green); color: white; }
+.account-form input { flex: 1 1 170px; min-width: 0; padding: 9px 12px; background: white; border: 1px solid #d7e5dc; border-radius: 9px; color: var(--ink); }
+.account-form input:focus-visible { outline: 2px solid var(--green); outline-offset: 1px; }
+.account-form .primary { display: inline-flex; align-items: center; gap: 6px; padding: 9px 15px; background: var(--green); border: 0; border-radius: 9px; color: white; font-size: 13px; cursor: pointer; }
+.account-form .primary:disabled { opacity: .6; cursor: progress; }
+.account-status { display: flex; flex-wrap: wrap; align-items: center; gap: 9px; font-size: 13px; }
+.account-email { font-weight: 600; max-width: 220px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.account-credits { display: inline-flex; align-items: center; gap: 5px; padding: 4px 10px; background: white; border: 1px solid #d7e5dc; border-radius: 20px; font-variant-numeric: tabular-nums; }
+.account-status button { display: inline-flex; align-items: center; gap: 5px; padding: 5px 11px; background: white; border: 1px solid #d7e5dc; border-radius: 8px; color: var(--ink); font-size: 13px; cursor: pointer; }
+.account-status button:hover { border-color: var(--green); }
+.account-message { margin: 0; color: var(--green-deep); font-size: 13px; }
+.account-hint { margin: 0; color: var(--muted); font-size: 12px; line-height: 1.6; }
+.history-panel { padding: 13px; background: white; border: 1px solid #d7e5dc; border-radius: 11px; }
+.history-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 10px; }
+.history-head h3 { margin: 0; font-size: 14px; }
+.history-head button { padding: 4px; background: transparent; border: 0; color: var(--muted); cursor: pointer; }
+.history-grid { display: grid; gap: 16px; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); }
+.history-grid h4 { margin: 0 0 7px; color: var(--muted); font-size: 12px; font-weight: 600; letter-spacing: .04em; text-transform: uppercase; }
+.history-grid ul { margin: 0; padding: 0; list-style: none; display: grid; gap: 6px; max-height: 260px; overflow-y: auto; }
+.history-grid li { display: flex; flex-wrap: wrap; align-items: center; gap: 7px; padding: 7px 9px; background: var(--paper); border-radius: 8px; font-size: 12.5px; }
+.history-grid time { margin-left: auto; color: var(--muted); font-size: 11.5px; font-variant-numeric: tabular-nums; }
+.history-grid .tag { padding: 2px 8px; border-radius: 20px; font-size: 11.5px; font-weight: 600; }
+.history-grid .tag.ok { background: #dff0e6; color: #14603f; }
+.history-grid .tag.bad { background: #fbe6e2; color: #8f3524; }
+.history-error { color: #8f3524; font-size: 11.5px; }
+@media (max-width: 640px) {
+  .account-form input, .account-form .primary { flex: 1 1 100%; }
+  .account-email { max-width: 100%; }
+}
