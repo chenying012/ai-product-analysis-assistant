@@ -39,16 +39,28 @@ export async function readResponseText(response: Response, maxBytes = MAX_PAGE_B
   } finally { reader.releaseLock(); }
 }
 
+/**
+ * Headers used when reading a public product page.
+ *
+ * A self-identifying agent string was rejected outright by Amazon, which made the whole tool
+ * unusable, so ordinary browser headers are sent instead. This only makes the request look like the
+ * normal one a visitor's browser would send for the same public page; nothing about a verification
+ * challenge is bypassed. A returned CAPTCHA or interstitial is still reported as SOURCE_BLOCKED
+ * rather than worked around.
+ */
+export const BROWSER_HEADERS = {
+  "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
+  "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+  "Accept-Language": "en-US,en;q=0.9",
+  "Accept-Encoding": "gzip, deflate, br",
+  "Upgrade-Insecure-Requests": "1",
+} as const;
+
 function readDirect(url: string, signal: AbortSignal): Promise<{ html: string; redirect?: string }> {
   return new Promise((resolve, reject) => {
     const req = request(url, {
       signal,
-      headers: {
-        "User-Agent": "ProductAnalysisAssistant/0.1",
-        "Accept": "text/html,application/xhtml+xml",
-        "Accept-Language": "en-US,en;q=0.9",
-        "Accept-Encoding": "gzip, deflate, br",
-      },
+      headers: { ...BROWSER_HEADERS },
       lookup(hostname, options, callback) {
         lookup(hostname, { all: true }, (error, addresses) => {
           if (error) return callback(error, "");

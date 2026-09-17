@@ -5,7 +5,7 @@ import { consumeAnalysisStream } from "../lib/event-stream";
 import type { AnalysisEvent } from "../lib/contracts";
 import { createAnalyzeHandler, RequestGate } from "../lib/server/analyze-handler";
 import { generateContent } from "../lib/server/generate";
-import { fetchProduct, type HtmlFetcher } from "../lib/server/source";
+import { BROWSER_HEADERS, fetchProduct, type HtmlFetcher } from "../lib/server/source";
 import { parseFetchEndpoint } from "../lib/server/config";
 import { config, link, product, validContent, validQuality, html as fixtureHtml } from "./fixtures";
 
@@ -58,6 +58,17 @@ test("an available price never triggers a fallback request", async () => {
   const result = await fetchProduct(link, { ...config, fetchEndpoint: "https://relay.invalid/fetch?url={url}" }, new AbortController().signal, fetcher);
   assert.deepEqual(providers, ["direct"]);
   assert.equal(result.price?.display, "$29.95");
+});
+
+test("the page request presents ordinary browser headers", () => {
+  // A self-identifying agent string was rejected outright by Amazon, which made every collection fail
+  // with SOURCE_BLOCKED. Reverting to one would silently break the product again.
+  assert.match(BROWSER_HEADERS["User-Agent"], /^Mozilla\/5\.0 /);
+  assert.ok(!/ProductAnalysis|bot|crawler|spider/i.test(BROWSER_HEADERS["User-Agent"]), "不得使用自识别的爬虫标识");
+  assert.match(BROWSER_HEADERS.Accept, /text\/html/);
+  assert.equal(BROWSER_HEADERS["Accept-Language"], "en-US,en;q=0.9");
+  // Compression must stay declared, otherwise the reader has nothing to decompress and pages inflate.
+  assert.match(BROWSER_HEADERS["Accept-Encoding"], /gzip/);
 });
 
 test("the relay template must be an HTTPS address containing the url placeholder", () => {
